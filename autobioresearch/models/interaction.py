@@ -93,5 +93,5 @@ class ExtractedInteractionRaw(BaseModel):
     assay_type: Optional[str] = None
     confidence: str                       # high | medium | low
     confidence_score: float = Field(ge=0.0, le=1.0)
-    snippet: str
-    reasoning: str                        # LLM chain-of-thought (not stored in DB)
+    snippet: str = ""
+    reasoning: str = ""                   # LLM chain-of-thought (not stored in DB)

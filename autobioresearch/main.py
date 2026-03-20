@@ -192,6 +192,9 @@ def run_extraction_phase(
     if not pending:
         return 0, 0, 0, 0
 
+    # Refresh the normalizer's DB connection — the one used at construction is closed.
+    extractor._normalizer.set_repo(repos.entities)
+
     logger.info(f"Extracting from {len(pending)} papers")
 
     papers_processed = 0

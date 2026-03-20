@@ -186,6 +186,26 @@ class PaperExtractor:
             f"For each interaction, include the EXACT verbatim snippet (max 400 chars) from the text above."
         )
 
+    # ------------------------------------------------------------------
+    # Enum normalisation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _norm(value: str | None, fallback: str = "unknown") -> str:
+        """
+        Normalise LLM enum output to match our StrEnum values.
+        Handles uppercase, spaces, and hyphens that local models sometimes emit.
+        e.g. "Direct Binding" → "direct_binding", "IN-VITRO" → "in_vitro"
+        """
+        if not value:
+            return fallback
+        return value.lower().strip().replace(" ", "_").replace("-", "_")
+
+    @staticmethod
+    def _norm_confidence(value: str | None) -> str:
+        v = (value or "low").lower().strip()
+        return v if v in ("high", "medium", "low") else "low"
+
     def _parse_llm_output(
         self,
         raw: dict,
@@ -201,12 +221,14 @@ class PaperExtractor:
             try:
                 entities.append(ExtractedEntityRaw(
                     name=ent_data["name"],
-                    entity_type=ent_data.get("entity_type", "unknown"),
+                    entity_type=self._norm(ent_data.get("entity_type"), "unknown"),
                     synonyms=ent_data.get("synonyms", []),
                     organism=ent_data.get("organism"),
                 ))
             except Exception as e:
-                logger.debug(f"Skipping malformed entity from paper {paper_id}: {e}")
+                logger.warning(
+                    f"Skipping malformed entity from paper {paper_id}: {e} | raw={ent_data}"
+                )
 
         for int_data in raw.get("interactions", []):
             try:
@@ -227,22 +249,27 @@ class PaperExtractor:
                 interactions.append(ExtractedInteractionRaw(
                     entity_a=int_data["entity_a"],
                     entity_b=int_data["entity_b"],
-                    interaction_type=int_data.get("interaction_type", "unknown"),
-                    direction=int_data.get("direction", "undirected"),
-                    effect=int_data.get("effect"),
-                    evidence_type=int_data.get("evidence_type", "unknown"),
+                    interaction_type=self._norm(int_data.get("interaction_type"), "unknown"),
+                    direction=self._norm(int_data.get("direction"), "undirected"),
+                    effect=int_data.get("effect") or None,
+                    evidence_type=self._norm(int_data.get("evidence_type"), "unknown"),
                     evidence_subtype=int_data.get("evidence_subtype"),
                     organism=int_data.get("organism"),
                     tissue_cell_type=int_data.get("tissue_cell_type"),
                     condition=int_data.get("condition"),
                     assay_type=int_data.get("assay_type"),
-                    confidence=int_data.get("confidence", "low"),
+                    confidence=self._norm_confidence(int_data.get("confidence")),
                     confidence_score=float(int_data.get("confidence_score", 0.3)),
                     snippet=snippet[:self._config.max_snippet_length],
-                    reasoning=int_data.get("reasoning", ""),
+                    reasoning=int_data.get("reasoning") or "",
                 ))
             except Exception as e:
-                logger.debug(f"Skipping malformed interaction from paper {paper_id}: {e}")
+                logger.warning(
+                    f"Skipping malformed interaction from paper {paper_id}: {e} | "
+                    f"entity_a={int_data.get('entity_a')} entity_b={int_data.get('entity_b')} "
+                    f"interaction_type={int_data.get('interaction_type')} "
+                    f"evidence_type={int_data.get('evidence_type')}"
+                )
 
         return entities, interactions, notes
 

@@ -59,6 +59,17 @@ def _get_reasoning_logger(config: AppConfig) -> Optional[logging.Logger]:
 # Regex for <think>…</think> blocks (Qwen3, QwQ, etc.)
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 
+# Hermes-style XML tool call format emitted by many local models:
+#   <tool_call><function=name><parameter=p>value</parameter></function></tool_call>
+_XML_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*<function=([^>]+)>(.*?)</function>\s*</tool_call>",
+    re.DOTALL | re.IGNORECASE,
+)
+_XML_PARAM_RE = re.compile(
+    r"<parameter=([^>]+)>(.*?)</parameter>",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 class LLMClient:
     """
@@ -204,10 +215,32 @@ class LLMClient:
 
         choice = response.choices[0] if response.choices else None
         if not choice:
+            logger.warning("LLM returned no choices")
             return None
 
-        # Capture reasoning before touching content — also strips <think> tags.
         tool_name = tool_function.get("function", {}).get("name", "tool_call")
+        finish_reason = getattr(choice, "finish_reason", "unknown")
+
+        if finish_reason == "length":
+            logger.warning(
+                f"LLM response truncated (finish_reason=length) for tool '{tool_name}'. "
+                f"Response hit max_tokens={self._config.llm_max_tokens}. "
+                f"Consider raising llm_max_tokens in config.yaml."
+            )
+
+        # Grab raw content BEFORE think-stripping — the model may embed the tool call
+        # inside <think> tags (observed with Qwen3), which would otherwise be stripped.
+        # Also check reasoning_content: some servers (Qwen/DeepSeek) move the entire
+        # chain-of-thought (including the tool call) into a dedicated field, leaving
+        # content empty.
+        raw_content = getattr(choice.message, "content", "") or ""
+        raw_reasoning = getattr(choice.message, "reasoning_content", "") or ""
+        xml_result_pre = (
+            self._parse_xml_tool_call(raw_content)
+            or self._parse_xml_tool_call(raw_reasoning)
+        )
+
+        # Capture/log reasoning and strip <think> tags from content.
         clean_content = self._capture_reasoning(choice.message, context=tool_name)
 
         tool_calls = getattr(choice.message, "tool_calls", None)
@@ -216,22 +249,145 @@ class LLMClient:
             try:
                 return json.loads(raw)
             except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse tool call JSON: {e}\nRaw: {raw[:500]}")
+                logger.warning(
+                    f"Tool call JSON parse failed for '{tool_name}' "
+                    f"(finish_reason={finish_reason}): {e}\n"
+                    f"Raw arguments (first 300 chars): {raw[:300]}"
+                )
+                repaired = self._repair_truncated_json(raw)
+                if repaired is not None:
+                    logger.info(f"Recovered partial JSON from truncated tool call for '{tool_name}'")
+                    return repaired
                 return self._extract_json_fallback(clean_content)
 
-        # Fallback: try to extract JSON from cleaned content
+        # No tool_calls — model used content field instead of the tool_calls mechanism.
+
+        # 1. XML found in raw content (e.g. tool call was inside <think> block)
+        if xml_result_pre is not None:
+            logger.debug(f"Recovered tool call for '{tool_name}' via XML parser (raw content)")
+            return xml_result_pre
+
+        # 2. XML found in clean content (tool call outside <think>)
+        xml_result_clean = self._parse_xml_tool_call(clean_content)
+        if xml_result_clean is not None:
+            logger.debug(f"Recovered tool call for '{tool_name}' via XML parser (clean content)")
+            return xml_result_clean
+
+        logger.warning(
+            f"No tool_calls in LLM response for '{tool_name}' "
+            f"(finish_reason={finish_reason}). "
+            f"Content after <think> strip (first 300 chars): "
+            f"{clean_content[:300] if clean_content else '(empty)'}"
+        )
         return self._extract_json_fallback(clean_content)
+
+    def _repair_truncated_json(self, raw: str) -> Optional[dict]:
+        """
+        Attempt to recover a dict from JSON that was cut off mid-stream (e.g. due to
+        max_tokens). Strategy: walk the string character-by-character tracking open
+        braces/brackets, then append the required closing characters.
+        If that still fails, walk backwards to the last complete element and close there.
+        """
+        s = raw.strip()
+        if not s:
+            return None
+
+        def _close(s: str) -> Optional[dict]:
+            stack: list[str] = []
+            in_string = False
+            escape = False
+            for ch in s:
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\" and in_string:
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch in "{[":
+                    stack.append(ch)
+                elif ch in "}]":
+                    if stack:
+                        stack.pop()
+            if not stack:
+                return None  # no repair needed / nothing to close
+            closing = "".join("}" if c == "{" else "]" for c in reversed(stack))
+            try:
+                return json.loads(s + closing)
+            except json.JSONDecodeError:
+                return None
+
+        # Attempt 1: close the open structure as-is
+        result = _close(s)
+        if result is not None:
+            return result
+
+        # Attempt 2: strip back to the last complete top-level comma-separated element
+        # (handles a truncated last array entry by removing it then closing)
+        for cut in (s.rfind(","), s.rfind("}")):
+            if cut > 0:
+                result = _close(s[: cut + 1])
+                if result is not None:
+                    return result
+
+        return None
+
+    def _parse_xml_tool_call(self, content: str) -> Optional[dict]:
+        """
+        Parse the Hermes-style XML tool call format that many local models emit
+        instead of using the proper OpenAI tool_calls mechanism:
+
+            <tool_call>
+            <function=tool_name>
+            <parameter=param_name>value</parameter>
+            ...
+            </function>
+            </tool_call>
+
+        Each parameter value is JSON-decoded if possible, otherwise kept as a string.
+        Returns a dict of {param_name: value} or None if the format is not detected.
+        """
+        match = _XML_TOOL_CALL_RE.search(content)
+        if not match:
+            return None
+
+        body = match.group(2)
+        result: dict = {}
+        for pm in _XML_PARAM_RE.finditer(body):
+            name = pm.group(1).strip()
+            value = pm.group(2).strip()
+            try:
+                result[name] = json.loads(value)
+            except json.JSONDecodeError:
+                result[name] = value
+
+        if not result:
+            return None
+
+        logger.debug(f"Parsed XML-style tool call with params: {list(result.keys())}")
+        return result
 
     def _extract_json_fallback(self, content: str) -> Optional[dict]:
         """Try to extract a JSON object from raw LLM content as a last resort."""
-        import re
+        if not content:
+            logger.warning("JSON fallback: content is empty — model returned no usable output")
+            return None
         matches = re.findall(r"\{[\s\S]+\}", content)
         for m in reversed(matches):  # try largest block first
             try:
                 return json.loads(m)
             except json.JSONDecodeError:
-                continue
-        logger.warning("Could not extract JSON from LLM response content")
+                repaired = self._repair_truncated_json(m)
+                if repaired is not None:
+                    return repaired
+        logger.warning(
+            f"Could not extract JSON from LLM content. "
+            f"Content (first 300 chars): {content[:300]}"
+        )
         return None
 
     def simple_completion(self, system: str, user: str) -> Optional[str]:

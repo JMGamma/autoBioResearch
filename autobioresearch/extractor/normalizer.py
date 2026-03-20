@@ -63,6 +63,10 @@ class EntityNormalizer:
         # 3. Create new entity
         return self._create_entity(raw)
 
+    def set_repo(self, entity_repo: EntityRepo):
+        """Swap in a fresh EntityRepo (new DB connection) while preserving caches."""
+        self._repo = entity_repo
+
     def rebuild_cache(self):
         """Reload synonym->entity_id mapping from DB (call after bulk inserts)."""
         self._synonym_cache.clear()

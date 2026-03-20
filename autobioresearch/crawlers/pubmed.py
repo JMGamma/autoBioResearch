@@ -1,6 +1,9 @@
 """
 PubMed crawler using NCBI Entrez E-utilities.
 No API key required for up to 3 req/s; set NCBI_API_KEY for 10 req/s.
+
+429 handling: both _get and _get_xml retry with exponential backoff, honouring
+the Retry-After header that NCBI includes on rate-limit responses.
 """
 from __future__ import annotations
 
@@ -18,6 +21,9 @@ from autobioresearch.utils.rate_limiter import RateLimiter
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+_MAX_RETRIES = 4
+_BASE_BACKOFF = 2.0   # seconds — doubles each attempt: 2, 4, 8, 16
 
 
 class PubMedCrawler(BaseCrawler):
@@ -43,20 +49,46 @@ class PubMedCrawler(BaseCrawler):
             p["api_key"] = self._api_key
         return p
 
-    def _get(self, endpoint: str, params: dict) -> dict:
-        self._limiter.acquire()
-        url = f"{BASE_URL}/{endpoint}"
-        resp = self._session.get(url, params=params, timeout=self._timeout)
+    def _request_with_retry(self, url: str, params: dict) -> requests.Response:
+        """GET with exponential backoff on 429 / 5xx, honouring Retry-After."""
+        for attempt in range(_MAX_RETRIES + 1):
+            self._limiter.acquire()
+            resp = self._session.get(url, params=params, timeout=self._timeout)
+
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                wait = float(retry_after) if retry_after else _BASE_BACKOFF * (2 ** attempt)
+                logger.warning(
+                    f"PubMed 429 rate-limit (attempt {attempt + 1}/{_MAX_RETRIES + 1}). "
+                    f"Waiting {wait:.1f}s before retry..."
+                )
+                time.sleep(wait)
+                continue
+
+            if resp.status_code >= 500 and attempt < _MAX_RETRIES:
+                wait = _BASE_BACKOFF * (2 ** attempt)
+                logger.warning(
+                    f"PubMed {resp.status_code} server error (attempt {attempt + 1}/{_MAX_RETRIES + 1}). "
+                    f"Waiting {wait:.1f}s before retry..."
+                )
+                time.sleep(wait)
+                continue
+
+            resp.raise_for_status()
+            return resp
+
+        # Final attempt after all retries exhausted
         resp.raise_for_status()
-        return resp.json()
+        return resp
+
+    def _get(self, endpoint: str, params: dict) -> dict:
+        url = f"{BASE_URL}/{endpoint}"
+        return self._request_with_retry(url, params).json()
 
     def _get_xml(self, endpoint: str, params: dict) -> str:
-        self._limiter.acquire()
         url = f"{BASE_URL}/{endpoint}"
         params = {k: v for k, v in params.items() if k != "retmode"}
-        resp = self._session.get(url, params=params, timeout=self._timeout)
-        resp.raise_for_status()
-        return resp.text
+        return self._request_with_retry(url, params).text
 
     def search_ids(self, query: str, max_results: int = 50) -> list[str]:
         """Return list of PMIDs matching the query."""
