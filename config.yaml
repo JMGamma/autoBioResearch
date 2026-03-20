@@ -10,7 +10,7 @@ llm_model: "qwen/qwen3.5-9b"
 # For openai_compatible mode, set the base URL of your local LLM REST server:
 llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 # llm_base_url: "http://localhost:1234/v1"    # LM Studio
-llm_api_key: "sk-lm-Y2t0J76e:LUSCVg4TFgkTpFVk4RjL"                          # most local servers accept any value
+# llm_api_key is read from LLM_API_KEY in .env — do not put keys here
 
 # --- LLM tuning ---
 llm_temperature: 0.1
@@ -65,7 +65,7 @@ log_file: "./logs/autobioresearch.log"
 # Set to true to capture <think>…</think> blocks and/or reasoning_content fields
 # from models like Qwen3, DeepSeek-R1, QwQ, etc.
 # Output goes to reasoning_log_file, rotated at reasoning_log_max_bytes.
-log_reasoning: false
+log_reasoning: true
 reasoning_log_file: "./logs/reasoning.log"
 reasoning_log_max_bytes: 10485760   # 10 MB
 reasoning_log_backup_count: 3
