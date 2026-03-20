@@ -1,10 +1,9 @@
 from enum import StrEnum
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from .entity import ExtractedEntityRaw
-    from .interaction import ExtractedInteractionRaw
+from .entity import ExtractedEntityRaw
+from .interaction import ExtractedInteractionRaw
 
 
 class FetchStatus(StrEnum):
@@ -40,7 +39,7 @@ class Paper(BaseModel):
 
 class ExtractionResult(BaseModel):
     paper_id: str
-    entities: list["ExtractedEntityRaw"]
-    interactions: list["ExtractedInteractionRaw"]
+    entities: list[ExtractedEntityRaw]
+    interactions: list[ExtractedInteractionRaw]
     extraction_notes: str = ""
     token_usage: dict[str, int] = Field(default_factory=dict)
