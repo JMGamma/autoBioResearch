@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv init:*)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(rm main.py)",
+      "Bash(mkdir -p autobioresearch/models autobioresearch/crawlers autobioresearch/extractor autobioresearch/conflict autobioresearch/storage autobioresearch/utils config scripts logs)"
+    ]
+  }
+}

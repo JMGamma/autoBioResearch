@@ -1,0 +1,81 @@
+# AutoBioResearch configuration
+# Override any value via environment variable using the same key uppercased.
+# Sensitive keys (API keys) should go in .env instead.
+
+# --- LLM Backend ---
+# Use "anthropic" for Claude via Anthropic API (requires ANTHROPIC_API_KEY in .env)
+# Use "openai_compatible" for local LLMs (Ollama, LM Studio, vLLM, llama.cpp server, etc.)
+llm_api_type: "anthropic"
+llm_model: "claude-sonnet-4-6"
+# For openai_compatible mode, set the base URL of your local LLM REST server:
+# llm_base_url: "http://localhost:11434/v1"   # Ollama
+# llm_base_url: "http://localhost:1234/v1"    # LM Studio
+# llm_api_key: "none"                          # most local servers accept any value
+
+# --- LLM tuning ---
+llm_temperature: 0.1
+llm_max_tokens: 4096
+llm_requests_per_minute: 40
+llm_max_retries: 3
+llm_retry_backoff_seconds: 5
+
+# --- Database ---
+db_path: "./autobioresearch.db"
+
+# --- Paper fetching ---
+crawler_threads: 4
+papers_per_query: 50
+max_full_text_per_cycle: 20
+pubmed_requests_per_second: 3
+semantic_scholar_requests_per_second: 1
+
+# --- Extraction ---
+max_chunk_chars: 6000
+chunk_overlap_chars: 200
+min_snippet_length: 20
+max_snippet_length: 400
+snippet_fuzzy_threshold: 0.75
+
+# --- Conflict detection ---
+max_candidate_pairs_per_cycle: 500
+
+# --- Entity normalization ---
+fuzzy_match_threshold: 0.92
+min_interactions_per_entity: 3
+
+# --- Scoring ---
+# score = (N_entities * N_interactions) / (1 + penalty * weighted_conflict_sum)
+# penalty_weight per conflict type: true=1.0, ambiguous=0.5, context_dependent=0.2
+penalty: 2.0
+
+# --- Loop control ---
+cycle_sleep_seconds: 300
+max_cycles: 0   # 0 = run forever
+
+# --- Per-cycle processing caps ---
+queries_per_cycle: 10
+papers_per_cycle: 50
+conflicts_to_analyze_per_cycle: 20
+
+# --- Logging ---
+log_level: "INFO"
+log_file: "./logs/autobioresearch.log"
+
+# --- Seed queries (bootstrap the system) ---
+seed_queries:
+  - query: "protein-protein interactions cancer signaling"
+    source_api: pubmed
+  - query: "kinase substrate phosphorylation mechanism"
+    source_api: pubmed
+  - query: "transcription factor target gene regulation"
+    source_api: pubmed
+  - query: "enzyme inhibitor mechanism binding"
+    source_api: pubmed
+  - query: "GPCR signaling pathway receptor"
+    source_api: pubmed
+  - query: "metabolic enzyme substrate product"
+    source_api: pubmed
+  - query: "immune checkpoint protein interaction"
+    source_api: pubmed
+  - query: "DNA repair protein complex"
+    source_api: pubmed

@@ -1,0 +1,150 @@
+# Seeded biological synonym mappings.
+# canonical: the normalized name stored in the DB
+# aliases: all known alternate names (case-insensitive matching applied at runtime)
+# entity_type: matches EntityType enum values
+# organism: optional; omit for species-agnostic aliases
+
+known_aliases:
+  # --- Cytokines ---
+  - canonical: "TNF"
+    aliases: ["TNF-alpha", "TNFa", "TNFA", "tumor necrosis factor alpha", "cachectin", "tumor necrosis factor"]
+    entity_type: protein
+
+  - canonical: "IL6"
+    aliases: ["IL-6", "interleukin-6", "interleukin 6", "BSF-2", "HGF", "HSF"]
+    entity_type: protein
+
+  - canonical: "IL1B"
+    aliases: ["IL-1beta", "IL-1b", "IL1beta", "interleukin-1 beta", "interleukin 1 beta"]
+    entity_type: protein
+
+  - canonical: "IFNG"
+    aliases: ["IFN-gamma", "IFNg", "interferon gamma", "interferon-gamma"]
+    entity_type: protein
+
+  # --- Tumor suppressors ---
+  - canonical: "TP53"
+    aliases: ["p53", "TRP53", "tumor protein p53", "P53"]
+    entity_type: protein
+
+  - canonical: "RB1"
+    aliases: ["Rb", "pRb", "retinoblastoma protein", "retinoblastoma 1"]
+    entity_type: protein
+
+  - canonical: "BRCA1"
+    aliases: ["BRCA-1", "breast cancer 1"]
+    entity_type: protein
+
+  - canonical: "BRCA2"
+    aliases: ["BRCA-2", "breast cancer 2"]
+    entity_type: protein
+
+  # --- Kinases ---
+  - canonical: "AKT1"
+    aliases: ["AKT", "PKB", "protein kinase B", "RAC-alpha serine/threonine-protein kinase"]
+    entity_type: protein
+
+  - canonical: "MAPK1"
+    aliases: ["ERK2", "ERK", "p42 MAPK", "extracellular signal-regulated kinase 2"]
+    entity_type: protein
+
+  - canonical: "MAPK3"
+    aliases: ["ERK1", "p44 MAPK", "extracellular signal-regulated kinase 1"]
+    entity_type: protein
+
+  - canonical: "EGFR"
+    aliases: ["ErbB1", "HER1", "epidermal growth factor receptor"]
+    entity_type: protein
+
+  - canonical: "MTOR"
+    aliases: ["mTOR", "FRAP", "RAFT1", "mechanistic target of rapamycin"]
+    entity_type: protein
+
+  - canonical: "PIK3CA"
+    aliases: ["PI3K", "PI3Kalpha", "phosphatidylinositol 3-kinase", "p110alpha"]
+    entity_type: protein
+
+  - canonical: "BRAF"
+    aliases: ["B-Raf", "v-Raf murine sarcoma viral oncogene homolog B"]
+    entity_type: protein
+
+  - canonical: "KRAS"
+    aliases: ["K-Ras", "KRAS2", "Kirsten RAS"]
+    entity_type: protein
+
+  # --- Cell cycle ---
+  - canonical: "CDKN1A"
+    aliases: ["p21", "CIP1", "WAF1", "cyclin-dependent kinase inhibitor 1A"]
+    entity_type: protein
+
+  - canonical: "CDKN2A"
+    aliases: ["p16", "INK4a", "ARF", "p14ARF", "p16INK4a"]
+    entity_type: protein
+
+  - canonical: "MDM2"
+    aliases: ["HDM2", "murine double minute 2"]
+    entity_type: protein
+
+  # --- Transcription factors ---
+  - canonical: "MYC"
+    aliases: ["c-Myc", "c-MYC", "proto-oncogene Myc"]
+    entity_type: protein
+
+  - canonical: "NFKB1"
+    aliases: ["NF-kB", "NF-kappaB", "nuclear factor kappa B"]
+    entity_type: protein
+
+  - canonical: "HIF1A"
+    aliases: ["HIF-1alpha", "HIF1alpha", "hypoxia-inducible factor 1 alpha"]
+    entity_type: protein
+
+  - canonical: "STAT3"
+    aliases: ["APRF", "signal transducer and activator of transcription 3"]
+    entity_type: protein
+
+  # --- Apoptosis ---
+  - canonical: "BCL2"
+    aliases: ["Bcl-2", "B-cell lymphoma 2"]
+    entity_type: protein
+
+  - canonical: "BAX"
+    aliases: ["Bcl-2-associated X protein"]
+    entity_type: protein
+
+  - canonical: "CASP3"
+    aliases: ["caspase-3", "caspase 3", "CPP32"]
+    entity_type: protein
+
+  # --- Common metabolites ---
+  - canonical: "ATP"
+    aliases: ["adenosine triphosphate", "adenosine 5'-triphosphate"]
+    entity_type: metabolite
+
+  - canonical: "NAD+"
+    aliases: ["NAD", "nicotinamide adenine dinucleotide"]
+    entity_type: metabolite
+
+  - canonical: "NADH"
+    aliases: ["reduced NAD", "reduced nicotinamide adenine dinucleotide"]
+    entity_type: metabolite
+
+  - canonical: "glucose"
+    aliases: ["D-glucose", "dextrose", "blood sugar"]
+    entity_type: metabolite
+
+  # --- Common pathways ---
+  - canonical: "PI3K-AKT pathway"
+    aliases: ["PI3K/AKT", "PI3K/Akt signaling", "phosphoinositide 3-kinase pathway"]
+    entity_type: pathway
+
+  - canonical: "MAPK pathway"
+    aliases: ["ERK pathway", "RAS-MAPK", "MAPK/ERK pathway"]
+    entity_type: pathway
+
+  - canonical: "Wnt pathway"
+    aliases: ["Wnt signaling", "canonical Wnt", "Wnt/beta-catenin"]
+    entity_type: pathway
+
+  - canonical: "Notch pathway"
+    aliases: ["Notch signaling"]
+    entity_type: pathway
