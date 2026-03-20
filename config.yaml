@@ -5,12 +5,12 @@
 # --- LLM Backend ---
 # Use "anthropic" for Claude via Anthropic API (requires ANTHROPIC_API_KEY in .env)
 # Use "openai_compatible" for local LLMs (Ollama, LM Studio, vLLM, llama.cpp server, etc.)
-llm_api_type: "anthropic"
-llm_model: "claude-sonnet-4-6"
+llm_api_type: "openai_compatible"
+llm_model: "qwen/qwen3.5-9b"
 # For openai_compatible mode, set the base URL of your local LLM REST server:
-# llm_base_url: "http://localhost:11434/v1"   # Ollama
+llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 # llm_base_url: "http://localhost:1234/v1"    # LM Studio
-# llm_api_key: "none"                          # most local servers accept any value
+llm_api_key: "sk-lm-Y2t0J76e:LUSCVg4TFgkTpFVk4RjL"                          # most local servers accept any value
 
 # --- LLM tuning ---
 llm_temperature: 0.1
@@ -60,6 +60,15 @@ conflicts_to_analyze_per_cycle: 20
 # --- Logging ---
 log_level: "INFO"
 log_file: "./logs/autobioresearch.log"
+
+# --- Reasoning / thinking capture (openai_compatible only) ---
+# Set to true to capture <think>…</think> blocks and/or reasoning_content fields
+# from models like Qwen3, DeepSeek-R1, QwQ, etc.
+# Output goes to reasoning_log_file, rotated at reasoning_log_max_bytes.
+log_reasoning: false
+reasoning_log_file: "./logs/reasoning.log"
+reasoning_log_max_bytes: 10485760   # 10 MB
+reasoning_log_backup_count: 3
 
 # --- Seed queries (bootstrap the system) ---
 seed_queries:

@@ -76,6 +76,7 @@ AutoBioResearch/
 │
 └── scripts/
     ├── init_db.py                 # One-time DB initialization
+    ├── reset_db.py                # Wipe data for testing (soft or hard)
     ├── inspect_conflicts.py       # CLI conflict queue viewer
     └── export_graph.py            # Export to JSON or GraphML
 ```
@@ -132,7 +133,22 @@ llm_model: "claude-sonnet-4-6"
 # llm_api_key: "none"
 ```
 
-Local LLMs need to support function calling / tool use (Llama 3.1+, Mistral, Qwen 2.5, etc.).
+Local LLMs need to support function calling / tool use (Llama 3.1+, Mistral, Qwen 2.5+, etc.).
+
+### Capturing model reasoning (local LLMs only)
+
+Reasoning/thinking models (Qwen3, DeepSeek-R1, QwQ, etc.) expose their chain-of-thought either as `<think>…</think>` blocks inside the response content or as a separate `reasoning_content` field on the message object. AutoBioResearch can capture both and write them to a dedicated rotating log file, which is useful for evaluating how well a model is interpreting papers.
+
+Enable it in `config.yaml`:
+
+```yaml
+log_reasoning: true
+reasoning_log_file: "./logs/reasoning.log"
+reasoning_log_max_bytes: 10485760   # rotate at 10 MB
+reasoning_log_backup_count: 3
+```
+
+Each entry in `reasoning.log` is timestamped and labelled with the tool call that triggered it (e.g. `[extract_interactions]`, `[classify_conflict]`), separated by a rule line for easy scanning. The `<think>` tags are always stripped from the content passed to the JSON parser regardless of whether logging is enabled, so this setting has no effect on extraction quality.
 
 ### Initialize the database
 
@@ -156,6 +172,23 @@ Options:
 --config PATH       Path to config.yaml (default: ./config.yaml)
 --cycles N          Stop after N cycles (default: 0 = run forever)
 --no-conflicts      Skip conflict detection (Arm 2) — useful for initial data collection
+```
+
+### Reset the database (testing)
+
+```bash
+# Soft reset — truncates all data rows, keeps schema (ready to run again immediately)
+uv run scripts/reset_db.py
+
+# Hard reset — deletes the .db file and recreates it from scratch
+uv run scripts/reset_db.py --hard
+
+# Skip the confirmation prompt (useful in test scripts)
+uv run scripts/reset_db.py --yes
+uv run scripts/reset_db.py --hard --yes
+
+# Custom DB path
+uv run scripts/reset_db.py --db-path ./test_run.db --hard --yes
 ```
 
 ### Inspect conflicts

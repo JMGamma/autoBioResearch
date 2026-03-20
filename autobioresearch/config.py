@@ -71,6 +71,14 @@ class AppConfig(BaseSettings):
     log_level: str = "INFO"
     log_file: str = "./logs/autobioresearch.log"
 
+    # --- Reasoning / thinking capture (openai_compatible only) ---
+    # Captures <think>…</think> blocks (Qwen3, DeepSeek-R1, QwQ, etc.) and/or
+    # the reasoning_content field exposed by some server APIs (DeepSeek-style).
+    log_reasoning: bool = False
+    reasoning_log_file: str = "./logs/reasoning.log"
+    reasoning_log_max_bytes: int = 10_485_760   # 10 MB per file
+    reasoning_log_backup_count: int = 3
+
     # --- Seed queries (loaded from YAML, not env) ---
     seed_queries: list[dict] = Field(default_factory=list)
 
