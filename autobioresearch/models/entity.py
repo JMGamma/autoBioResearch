@@ -13,7 +13,8 @@ class EntityType(StrEnum):
     PATHWAY = "pathway"
     PHENOTYPE = "phenotype"
     DISEASE = "disease"
-    CELL_TYPE = "cell_type"
+    CELL_TYPE = "cell_type"       # primary cell type (e.g. CD4+ T cell, neuron)
+    CELL_LINE = "cell_line"       # immortalised cell line (e.g. HEK293, HeLa, U87MG)
     ORGANISM = "organism"
     COMPLEX = "complex"           # macromolecular complex
     UNKNOWN = "unknown"

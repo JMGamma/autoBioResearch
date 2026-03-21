@@ -199,6 +199,20 @@ class EntityRepo:
             q = q.where(db.entities.c.entity_type == entity_type)
         return [(r.canonical_name, r.id) for r in self.conn.execute(q)]
 
+    def get_all_synonyms_for_type(self, entity_type: Optional[str] = None) -> list[tuple[str, str]]:
+        """
+        Returns list of (synonym, entity_id) for all entities of the given type(s).
+        Used by fuzzy matching so that known synonyms are candidates, not just canonical names.
+        """
+        # Join entity_synonyms → entities to filter by type
+        q = (
+            select(db.entity_synonyms.c.synonym, db.entity_synonyms.c.entity_id)
+            .join(db.entities, db.entities.c.id == db.entity_synonyms.c.entity_id)
+        )
+        if entity_type:
+            q = q.where(db.entities.c.entity_type == entity_type)
+        return [(r.synonym, r.entity_id) for r in self.conn.execute(q)]
+
     def increment_paper_count(self, entity_id: str):
         self.conn.execute(
             update(db.entities)

@@ -14,10 +14,11 @@ llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 
 # --- LLM tuning ---
 llm_temperature: 0.1
-llm_max_tokens: 4096
+llm_max_tokens: 262000
 llm_requests_per_minute: 40
 llm_max_retries: 3
 llm_retry_backoff_seconds: 5
+# llm_timeout_seconds: null  # null = no timeout (default); set to an integer (e.g. 3600) to cap
 
 # --- Database ---
 db_path: "./autobioresearch.db"
@@ -30,8 +31,8 @@ pubmed_requests_per_second: 3
 semantic_scholar_requests_per_second: 1
 
 # --- Extraction ---
-max_chunk_chars: 6000
-chunk_overlap_chars: 200
+max_chunk_chars: 100000
+chunk_overlap_chars: 2000
 min_snippet_length: 20
 max_snippet_length: 400
 snippet_fuzzy_threshold: 0.75
@@ -42,6 +43,14 @@ max_candidate_pairs_per_cycle: 500
 # --- Entity normalization ---
 fuzzy_match_threshold: 0.92
 min_interactions_per_entity: 3
+
+# --- External entity resolution ---
+# UniProt (proteins/genes) and ChEBI (molecules/metabolites) are queried when
+# exact synonym and fuzzy matching both fail, enriching the synonym set before
+# creating a new entity. Uses independent APIs with no shared NCBI rate-limit budget.
+entity_resolution_enabled: true
+entity_resolution_requests_per_second: 3.0
+entity_resolution_timeout: 10
 
 # --- Scoring ---
 # score = (N_entities * N_interactions) / (1 + penalty * weighted_conflict_sum)
@@ -71,20 +80,21 @@ reasoning_log_max_bytes: 10485760   # 10 MB
 reasoning_log_backup_count: 3
 
 # --- Seed queries (bootstrap the system) ---
+# All queries include mammalian organism filters to avoid plant/yeast/fish papers.
 seed_queries:
-  - query: "protein-protein interactions cancer signaling"
+  - query: "protein-protein interactions cancer signaling human mouse"
     source_api: pubmed
-  - query: "kinase substrate phosphorylation mechanism"
+  - query: "kinase substrate phosphorylation mechanism mammalian"
     source_api: pubmed
-  - query: "transcription factor target gene regulation"
+  - query: "transcription factor target gene regulation human"
     source_api: pubmed
-  - query: "enzyme inhibitor mechanism binding"
+  - query: "enzyme inhibitor mechanism binding human mouse rat"
     source_api: pubmed
-  - query: "GPCR signaling pathway receptor"
+  - query: "GPCR signaling pathway receptor mammalian"
     source_api: pubmed
-  - query: "metabolic enzyme substrate product"
+  - query: "metabolic enzyme substrate product human"
     source_api: pubmed
-  - query: "immune checkpoint protein interaction"
+  - query: "immune checkpoint protein interaction human mouse"
     source_api: pubmed
-  - query: "DNA repair protein complex"
+  - query: "DNA repair protein complex human"
     source_api: pubmed

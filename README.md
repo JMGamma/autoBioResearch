@@ -2,7 +2,7 @@
 
 An autonomous biological knowledge graph builder. AutoBioResearch crawls scientific literature, extracts biological entities and their interactions using an LLM, detects conflicting claims between papers, and generates targeted search queries to resolve those conflicts — all in a self-driving loop guided by a single score metric.
 
-Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch)'s tight feedback-loop philosophy, adapted for biological knowledge rather than ML experiments.
+Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch)'s tight feedback-loop philosophy, adapted for biological knowledge.
 
 ---
 
@@ -38,7 +38,7 @@ The loop maximizes this: more entities and interactions is better; unresolved co
 
 ```
 AutoBioResearch/
-├── config.yaml                    # All tuneable parameters
+├── config.yaml                    # Tuning parameters
 ├── config/
 │   └── synonyms.yaml              # Seeded biological synonym aliases
 │
@@ -102,12 +102,12 @@ AutoBioResearch/
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- An Anthropic API key **or** a locally-hosted OpenAI-compatible LLM (Ollama, LM Studio, vLLM, etc.)
+- An Anthropic API key **or** OpenAI-compatible LLM (Ollama, LM Studio, vLLM, etc.)
 
 ### Install
 
 ```bash
-git clone https://github.com/your-username/autobioresearch
+git clone https://github.com/JMGamma/autobioresearch
 cd autobioresearch
 uv sync
 ```
@@ -116,7 +116,7 @@ uv sync
 
 ```bash
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# API keys and other secrets stored in .env
 ```
 
 All other settings live in `config.yaml`. Key options:
@@ -127,18 +127,28 @@ llm_api_type: "anthropic"
 llm_model: "claude-sonnet-4-6"
 
 # OR: use a local LLM via OpenAI-compatible REST API
-# llm_api_type: "openai_compatible"
-# llm_model: "llama3.1:8b"
-# llm_base_url: "http://localhost:11434/v1"   # Ollama example
-# llm_api_key: "none"
+llm_api_type: "openai_compatible"
+llm_model: "llama3.1:8b"
+llm_base_url: "http://localhost:11434/v1"   # Ollama example
+llm_api_key: "none"
+```
+
+Larger papers can be chunked to enable use of smaller LLMs. Chunking settings are configured in config.yaml. Default settings were used with Qwen3.5-9B. Models with smaller context windows will require more aggressive chunking.  Use caution when chunking papers, as critical biological context may be lost if content is split into different chunks.
+
+```yaml
+# --- Extraction ---
+max_chunk_chars: 100000
+chunk_overlap_chars: 2000
+min_snippet_length: 20
+max_snippet_length: 400
+snippet_fuzzy_threshold: 0.75
 ```
 
 Local LLMs need to support function calling / tool use (Llama 3.1+, Mistral, Qwen 2.5+, etc.).
 
 ### Capturing model reasoning (local LLMs only)
 
-Reasoning/thinking models (Qwen3, DeepSeek-R1, QwQ, etc.) expose their chain-of-thought either as `<think>…</think>` blocks inside the response content or as a separate `reasoning_content` field on the message object. AutoBioResearch can capture both and write them to a dedicated rotating log file, which is useful for evaluating how well a model is interpreting papers.
-
+Capture of model reasoning outputs is possible for model evaluation & rapid troubleshooting. 
 Enable it in `config.yaml`:
 
 ```yaml
@@ -147,8 +157,6 @@ reasoning_log_file: "./logs/reasoning.log"
 reasoning_log_max_bytes: 10485760   # rotate at 10 MB
 reasoning_log_backup_count: 3
 ```
-
-Each entry in `reasoning.log` is timestamped and labelled with the tool call that triggered it (e.g. `[extract_interactions]`, `[classify_conflict]`), separated by a rule line for easy scanning. The `<think>` tags are always stripped from the content passed to the JSON parser regardless of whether logging is enabled, so this setting has no effect on extraction quality.
 
 ### Initialize the database
 
@@ -265,7 +273,7 @@ Entities are deduplicated using a layered strategy:
 
 | API | Default | With API key |
 |---|---|---|
-| PubMed (NCBI) | 3 req/s | 10 req/s (set `NCBI_API_KEY`) |
+| PubMed (NCBI) | 3 req/s | 10 req/s (set `NCBI_API_KEY` in .env) |
 | Semantic Scholar | 1 req/s | — |
 | Anthropic / local LLM | 40 req/min (configurable) | — |
 

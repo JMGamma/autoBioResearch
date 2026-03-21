@@ -7,6 +7,15 @@ You are an expert biological literature analyst specializing in extracting struc
 knowledge from scientific papers. Your task is to identify biological entities and their \
 interactions from the provided text.
 
+SCOPE — MAMMALS ONLY:
+This database covers mammalian biology exclusively. Only extract entities and interactions \
+studied in mammalian species (humans, mice, rats, primates, pigs, cows, dogs, rabbits, etc.). \
+SKIP and DO NOT extract anything studied solely in: plants (Arabidopsis, rice, maize, etc.), \
+yeast (Saccharomyces, Schizosaccharomyces, etc.), insects (Drosophila, mosquito, etc.), \
+nematodes (C. elegans), fish (zebrafish, Danio rerio, etc.), frogs (Xenopus, etc.), \
+bacteria, archaea, or viruses studied only in non-mammalian hosts. \
+If a paper studies both yeast and human cells, extract only the human/mammalian findings.
+
 CRITICAL RULES:
 1. Only extract interactions that are EXPLICITLY stated or DIRECTLY measured in this paper's \
    text — not background knowledge the authors cite or assume.
@@ -27,9 +36,15 @@ CRITICAL RULES:
 5. If interaction direction is unclear, use "undirected".
 6. For effect: use "activates", "inhibits", "binds", "phosphorylates", "ubiquitinates", \
    "cleaves", "recruits", "localizes", "transports", or null if unclear.
-7. Report organisms precisely: "Homo sapiens", "Mus musculus", "Saccharomyces cerevisiae", etc.
-8. Do NOT extract interactions just mentioned in the Introduction as prior work; only extract \
-   what is demonstrated/measured in THIS paper's experiments.
+7. Report organisms precisely: "Homo sapiens", "Mus musculus", "Rattus norvegicus", etc.
+8. Evidence source determines confidence — apply these rules strictly:
+   - Interactions DIRECTLY MEASURED in THIS paper's experiments → confidence based on rules 3–4 above.
+   - Interactions cited from prior work or mentioned as established background (e.g. "It is known \
+     that X activates Y", "Previous studies showed...") → extract with confidence "low" and \
+     set reasoning to note it is cited/reviewed rather than directly demonstrated here.
+   - Review papers that summarise a field → extract all interactions described, but ALL must be \
+     confidence "low" unless the review itself presents new meta-analysis or pooled data.
+   - Do NOT fabricate interactions not mentioned anywhere in the text.
 """
 
 EXTRACTION_TOOL = {
@@ -40,7 +55,7 @@ EXTRACTION_TOOL = {
         "properties": {
             "entities": {
                 "type": "array",
-                "description": "All biological entities mentioned in the text",
+                "description": "All biological entities mentioned in the text. MUST be an array of objects — use [] if none found. Never use a string.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -53,7 +68,7 @@ EXTRACTION_TOOL = {
                             "enum": [
                                 "protein", "gene", "molecule", "metabolite",
                                 "rna", "pathway", "phenotype", "disease",
-                                "cell_type", "organism", "complex", "unknown"
+                                "cell_type", "cell_line", "organism", "complex", "unknown"
                             ]
                         },
                         "synonyms": {
@@ -71,7 +86,7 @@ EXTRACTION_TOOL = {
             },
             "interactions": {
                 "type": "array",
-                "description": "Biological interactions demonstrated in this paper's experiments",
+                "description": "Biological interactions demonstrated in this paper's experiments. MUST be an array of objects — use [] if none found. Never use a string.",
                 "items": {
                     "type": "object",
                     "properties": {

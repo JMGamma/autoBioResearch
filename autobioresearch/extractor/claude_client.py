@@ -85,14 +85,22 @@ class LLMClient:
         self._api_type = config.llm_api_type
         self._reasoning_logger = _get_reasoning_logger(config)
 
+        # Build httpx timeout: None means no limit (safe for slow local LLMs).
+        # Both SDKs accept an httpx.Timeout or a plain number of seconds.
+        _timeout = config.llm_timeout_seconds  # None | int
+
         if self._api_type == "anthropic":
             import anthropic
-            self._client = anthropic.Anthropic(api_key=config.anthropic_api_key)
+            self._client = anthropic.Anthropic(
+                api_key=config.anthropic_api_key,
+                timeout=_timeout,
+            )
         elif self._api_type == "openai_compatible":
             import openai
             self._client = openai.OpenAI(
                 base_url=config.llm_base_url,
                 api_key=config.llm_api_key or "none",
+                timeout=_timeout,
             )
         else:
             raise ValueError(f"Unknown llm_api_type: {self._api_type!r}. Use 'anthropic' or 'openai_compatible'.")

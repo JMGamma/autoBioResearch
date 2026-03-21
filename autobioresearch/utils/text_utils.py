@@ -51,33 +51,120 @@ def chunk_text(text: str, max_chars: int = 6000, overlap: int = 200) -> list[tup
 
 def clean_jats_xml(xml_text: str) -> str:
     """
-    Convert JATS XML to plain readable text.
-    Extracts text from body, abstract, and title elements; strips figure/table noise.
+    Convert JATS XML to plain readable text for LLM processing.
+
+    Strips all boilerplate (metadata, references, acknowledgements, funding,
+    author notes, figure captions, tables) and avoids the duplication bug that
+    occurs when collecting both a <sec> container and its <p>/<title> children
+    via itertext() — each piece of text is emitted exactly once.
     """
     try:
         from lxml import etree
 
-        # Remove figure and table content (distracting for LLM)
         root = etree.fromstring(xml_text.encode(), parser=etree.XMLParser(recover=True))
 
-        for tag in ["fig", "table-wrap", "supplementary-material", "ref-list"]:
-            for el in root.iter(tag):
-                el.getparent().remove(el)
+        # ------------------------------------------------------------------
+        # 1. Remove entire subtrees that are noise / boilerplate
+        # ------------------------------------------------------------------
+        _NOISE_TAGS = {
+            "ref-list",               # bibliography
+            "fig",                    # figure + caption
+            "table-wrap",             # tables
+            "supplementary-material",
+            "ack",                    # acknowledgements
+            "fn-group",               # footnotes
+            "author-notes",           # author contributions, COI statements
+            "funding-group",          # funding sources
+            "permissions",            # copyright/license text
+            "history",                # submission/revision dates
+            "pub-date",               # publication date metadata
+            "journal-meta",           # journal name, ISSN, etc.
+            "custom-meta-group",      # publisher-specific metadata
+            "kwd-group",              # keyword list (redundant with body)
+            "counts",                 # figure/table/word counts
+            "notes",                  # miscellaneous notes block
+            "app-group",              # appendices
+            "app",
+        }
+        for tag in _NOISE_TAGS:
+            for el in root.findall(f".//{tag}"):
+                parent = el.getparent()
+                if parent is not None:
+                    parent.remove(el)
 
-        # Collect text from useful sections
-        sections = []
-        for section in root.iter("title", "abstract", "p", "sec"):
-            text = "".join(section.itertext()).strip()
-            if text:
-                sections.append(text)
+        # ------------------------------------------------------------------
+        # 2. Extract article title and abstract from <front>
+        # ------------------------------------------------------------------
+        parts: list[str] = []
 
-        return "\n\n".join(sections)
+        for el in root.findall(".//article-title"):
+            title_text = "".join(el.itertext()).strip()
+            if title_text:
+                parts.append(f"TITLE: {title_text}")
+            break  # only the first
+
+        for el in root.findall(".//abstract"):
+            abstract_text = "".join(el.itertext()).strip()
+            if abstract_text:
+                parts.append(f"ABSTRACT:\n{abstract_text}")
+            break  # only the first
+
+        # ------------------------------------------------------------------
+        # 3. Walk <body> collecting section headings + paragraphs only.
+        #    We recurse into <sec> containers WITHOUT calling itertext() on
+        #    them, which prevents each paragraph appearing multiple times.
+        # ------------------------------------------------------------------
+        body = root.find(".//body")
+        if body is not None:
+            _collect_jats_body(body, parts)
+
+        return "\n\n".join(parts)
 
     except Exception:
         # Fallback: strip all XML tags
         text = re.sub(r"<[^>]+>", " ", xml_text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
+
+
+def _strip_ns(tag: str) -> str:
+    """Strip XML namespace prefix: '{http://...}p' → 'p'."""
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _collect_jats_body(element, parts: list[str]) -> None:
+    """
+    Recursively walk a JATS body element, collecting:
+      - <title>  → section heading
+      - <p>      → paragraph text
+      - <sec>    → recurse (container only, no itertext on the sec itself)
+
+    All other tags (disp-formula, boxed-text, list, etc.) are collected as
+    paragraphs only if they are direct text-bearing leaves.
+    """
+    for child in element:
+        if not callable(getattr(child, "itertext", None)):
+            continue
+        tag = _strip_ns(child.tag) if isinstance(child.tag, str) else ""
+
+        if tag == "sec":
+            # Container — recurse without emitting the sec's own itertext
+            _collect_jats_body(child, parts)
+        elif tag == "title":
+            text = "".join(child.itertext()).strip()
+            if text:
+                parts.append(text)
+        elif tag == "p":
+            text = "".join(child.itertext()).strip()
+            if text:
+                parts.append(text)
+        elif tag in ("list", "def-list"):
+            # Emit list items as individual lines
+            for item in child.iter("p", "term", "def"):
+                text = "".join(item.itertext()).strip()
+                if text:
+                    parts.append(text)
+        # Intentionally skip: disp-formula, inline-formula, xref, ext-link, etc.
 
 
 def fuzzy_snippet_check(snippet: str, source_text: str, threshold: float = 0.75) -> bool:

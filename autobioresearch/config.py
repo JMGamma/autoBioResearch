@@ -31,6 +31,7 @@ class AppConfig(BaseSettings):
     llm_requests_per_minute: int = 40
     llm_max_retries: int = 3
     llm_retry_backoff_seconds: float = 5.0
+    llm_timeout_seconds: Optional[int] = None  # None = no timeout (safe for slow local LLMs)
 
     # --- Database ---
     db_path: str = "./autobioresearch.db"
@@ -57,6 +58,9 @@ class AppConfig(BaseSettings):
     # --- Entity normalization ---
     fuzzy_match_threshold: float = 0.92
     min_interactions_per_entity: int = 3
+    entity_resolution_enabled: bool = True   # UniProt + ChEBI external lookups
+    entity_resolution_requests_per_second: float = 3.0
+    entity_resolution_timeout: int = 10
 
     # --- Scoring ---
     penalty: float = 2.0

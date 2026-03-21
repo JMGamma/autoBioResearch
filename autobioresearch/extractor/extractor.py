@@ -34,6 +34,42 @@ from autobioresearch.utils.text_utils import (
 
 logger = logging.getLogger(__name__)
 
+# Known non-mammalian organisms — interactions with these as sole organism are skipped.
+# Lowercase; matched as substring so "arabidopsis thaliana" catches "arabidopsis".
+_NON_MAMMALIAN_ORGANISMS: frozenset[str] = frozenset({
+    # Plants
+    "arabidopsis", "oryza sativa", "zea mays", "solanum", "nicotiana",
+    "glycine max", "triticum", "hordeum", "populus", "physcomitrella",
+    # Yeast / fungi
+    "saccharomyces", "schizosaccharomyces", "candida", "aspergillus",
+    "neurospora", "cryptococcus", "pichia",
+    # Insects
+    "drosophila", "aedes", "anopheles", "bombyx", "tribolium",
+    # Nematodes
+    "caenorhabditis", "c. elegans",
+    # Fish
+    "danio rerio", "zebrafish", "oryzias", "medaka", "tetraodon",
+    "takifugu", "fundulus", "salmo", "oncorhynchus",
+    # Amphibians
+    "xenopus", "ambystoma",
+    # Birds
+    "gallus gallus", "chicken", "meleagris", "taeniopygia",
+    # Bacteria
+    "escherichia", "bacillus", "staphylococcus", "streptococcus",
+    "pseudomonas", "mycobacterium", "salmonella", "helicobacter",
+    "listeria", "campylobacter", "vibrio", "clostridium",
+    # Archaea
+    "methanococcus", "halobacterium", "sulfolobus",
+})
+
+
+def _is_non_mammalian(organism: Optional[str]) -> bool:
+    """Return True if the organism string clearly identifies a non-mammalian species."""
+    if not organism:
+        return False  # unspecified — assume mammalian context
+    org_lower = organism.lower().strip()
+    return any(nm in org_lower for nm in _NON_MAMMALIAN_ORGANISMS)
+
 
 class PaperExtractor:
     def __init__(self, config: AppConfig, llm: LLMClient, normalizer: EntityNormalizer):
@@ -46,20 +82,26 @@ class PaperExtractor:
         Extract entities and interactions from paper text.
         text may be an abstract or (transiently) a full-text string.
         """
-        chunks = chunk_text(
+        chunks = list(chunk_text(
             text,
             max_chars=self._config.max_chunk_chars,
             overlap=self._config.chunk_overlap_chars,
-        )
+        ))
 
         all_entities: list[ExtractedEntityRaw] = []
         all_interactions: list[ExtractedInteractionRaw] = []
         all_notes: list[str] = []
         total_tokens: dict[str, int] = {}
 
-        for chunk_start, chunk_end, chunk_text_str in chunks:
+        n_chunks = len(chunks)
+        if n_chunks > 1:
+            logger.debug(f"{paper_id}: {n_chunks} chunk(s), text_len={len(text)}")
+
+        for chunk_idx, (chunk_start, chunk_end, chunk_text_str) in enumerate(chunks):
             user_prompt = self._build_user_prompt(paper_id, title, chunk_text_str)
 
+            if n_chunks > 1:
+                logger.debug(f"Calling LLM for {paper_id} chunk {chunk_idx+1}/{n_chunks} @{chunk_start}")
             raw = self._llm.call_with_tool(
                 system=EXTRACTION_SYSTEM_PROMPT,
                 user=user_prompt,
@@ -217,7 +259,30 @@ class PaperExtractor:
         interactions: list[ExtractedInteractionRaw] = []
         notes = raw.get("extraction_notes", "")
 
-        for ent_data in raw.get("entities", []):
+        entities_raw = raw.get("entities", [])
+        interactions_raw = raw.get("interactions", [])
+
+        # Guard: model sometimes returns a string or None instead of a list
+        if not isinstance(entities_raw, list):
+            logger.warning(
+                f"Paper {paper_id}: 'entities' field is {type(entities_raw).__name__}, "
+                f"expected list — skipping. Value: {str(entities_raw)[:120]}"
+            )
+            entities_raw = []
+        if not isinstance(interactions_raw, list):
+            logger.warning(
+                f"Paper {paper_id}: 'interactions' field is {type(interactions_raw).__name__}, "
+                f"expected list — skipping. Value: {str(interactions_raw)[:120]}"
+            )
+            interactions_raw = []
+
+        for ent_data in entities_raw:
+            if not isinstance(ent_data, dict):
+                logger.warning(
+                    f"Paper {paper_id}: entity entry is {type(ent_data).__name__}, "
+                    f"expected dict — skipping. Value: {str(ent_data)[:80]}"
+                )
+                continue
             try:
                 entities.append(ExtractedEntityRaw(
                     name=ent_data["name"],
@@ -230,8 +295,31 @@ class PaperExtractor:
                     f"Skipping malformed entity from paper {paper_id}: {e} | raw={ent_data}"
                 )
 
-        for int_data in raw.get("interactions", []):
+        for int_data in interactions_raw:
+            if not isinstance(int_data, dict):
+                logger.warning(
+                    f"Paper {paper_id}: interaction entry is {type(int_data).__name__}, "
+                    f"expected dict — skipping. Value: {str(int_data)[:80]}"
+                )
+                continue
             try:
+                # Require both entity names
+                if not int_data.get("entity_a") or not int_data.get("entity_b"):
+                    logger.warning(
+                        f"Paper {paper_id}: interaction missing entity_a or entity_b — skipping. "
+                        f"entity_a={int_data.get('entity_a')!r} entity_b={int_data.get('entity_b')!r}"
+                    )
+                    continue
+
+                # Skip non-mammalian interactions
+                if _is_non_mammalian(int_data.get("organism")):
+                    logger.debug(
+                        f"Skipping non-mammalian interaction "
+                        f"({int_data.get('organism')}): "
+                        f"{int_data.get('entity_a')} <-> {int_data.get('entity_b')}"
+                    )
+                    continue
+
                 snippet = int_data.get("snippet", "")
 
                 # Verify snippet is plausibly in the source text

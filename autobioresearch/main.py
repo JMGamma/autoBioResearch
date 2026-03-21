@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import time
@@ -37,9 +38,12 @@ _shutdown = False
 
 
 def _handle_sigint(sig, frame):
-    global _shutdown
-    logger.info("Shutdown signal received. Finishing current cycle...")
-    _shutdown = True
+    # os._exit() terminates the process immediately at the OS level.
+    # This is the only approach that works on Windows when the main thread is
+    # blocked inside a C extension (e.g. httpx waiting for the LLM response).
+    # Per-paper commits mean the DB is consistent up to the last completed paper.
+    print("\nShutting down...", flush=True)
+    os._exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +187,12 @@ def run_extraction_phase(
     config: AppConfig,
     extractor: PaperExtractor,
     pmc_fetcher: PMCFullTextFetcher,
+    conn,
 ) -> tuple[int, int, int, int]:
     """
     Extract entities/interactions from pending papers.
     Returns (papers_processed, new_entities, new_interactions, new_evidence).
+    Commits after each paper so data is visible in the DB progressively.
     """
     pending = repos.papers.get_pending_extraction(config.papers_per_cycle)
     if not pending:
@@ -203,6 +209,10 @@ def run_extraction_phase(
     total_evidence = 0
 
     for paper_row in pending:
+        if _shutdown:
+            logger.info("Shutdown requested — stopping extraction early.")
+            break
+
         paper_id = paper_row["id"]
         title = paper_row.get("title") or ""
         abstract = paper_row.get("abstract") or ""
@@ -222,16 +232,13 @@ def run_extraction_phase(
             repos.papers.mark_extraction_failed(paper_id, "Insufficient text")
             continue
 
-        repos.papers.mark_extraction_failed(paper_id, "")  # set processing
-        # Actually mark as processing
-        from sqlalchemy import update as sa_update
-        from autobioresearch import database as db
-        from autobioresearch.storage.repositories import _now
-        # (inline since we need conn access — handled via repos pattern)
-        # We'll just proceed and mark done/failed at the end
-
         try:
             result = extractor.extract(paper_id, title, text)
+            msg = (
+                f"  {paper_id}: LLM returned {len(result.entities)} entities, "
+                f"{len(result.interactions)} interactions — persisting..."
+            )
+            logger.info(msg)
             ne, ni, nev = extractor.persist(result, repos)
 
             repos.papers.mark_extraction_done(paper_id, raw_llm_response=None)
@@ -246,8 +253,12 @@ def run_extraction_phase(
             )
 
         except Exception as e:
-            logger.error(f"Extraction failed for {paper_id}: {e}")
+            logger.error(f"Extraction failed for {paper_id}: {e}", exc_info=True)
             repos.papers.mark_extraction_failed(paper_id, str(e)[:2000])
+
+        # Commit after each paper so data is visible immediately and a later
+        # crash doesn't lose the whole batch.
+        conn.commit()
 
     return papers_processed, total_entities, total_interactions, total_evidence
 
@@ -323,10 +334,10 @@ def run_cycle(
         conn.commit()
 
         # --- Phase 3: Extract ---
+        # conn is passed so run_extraction_phase can commit after each paper.
         papers_done, new_ents, new_ints, new_ev = run_extraction_phase(
-            repos, config, extractor, pmc_fetcher
+            repos, config, extractor, pmc_fetcher, conn
         )
-        conn.commit()
 
         # --- Phase 4: Detect conflicts (Arm 2) ---
         new_conflicts = 0
@@ -400,14 +411,26 @@ def main():
     pmc_fetcher = PMCFullTextFetcher(ncbi_api_key=config.ncbi_api_key)
     llm = LLMClient(config)
 
-    # Normalizer needs a DB connection — we'll pass a fresh one per cycle
-    # For the normalizer's seeded aliases, we need a one-time connection
+    # External entity resolver (UniProt + ChEBI) — shared across all cycles,
+    # results cached in memory so repeated names are free after first lookup.
+    entity_resolver = None
+    if config.entity_resolution_enabled:
+        from autobioresearch.crawlers.entity_resolvers import EntityResolver
+        entity_resolver = EntityResolver(
+            requests_per_second=config.entity_resolution_requests_per_second,
+            timeout=config.entity_resolution_timeout,
+        )
+        logger.info("Entity resolution enabled (UniProt + ChEBI)")
+
+    # Normalizer needs a DB connection — we'll pass a fresh one per cycle.
+    # Seed aliases only need a one-time connection at startup.
     with engine.connect() as conn:
         from autobioresearch.storage.repositories import EntityRepo
         entity_repo = EntityRepo(conn)
         normalizer = EntityNormalizer(
             entity_repo=entity_repo,
             fuzzy_threshold=config.fuzzy_match_threshold,
+            entity_resolver=entity_resolver,
         )
         conn.commit()
 
