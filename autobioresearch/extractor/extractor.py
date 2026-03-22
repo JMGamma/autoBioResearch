@@ -232,16 +232,85 @@ class PaperExtractor:
     # Enum normalisation helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _norm(value: str | None, fallback: str = "unknown") -> str:
+    # LLM-invented interaction_type strings → valid InteractionType values.
+    # Two categories of mistake seen in the wild:
+    #   1. More specific sub-type used instead of the category  (binding → direct_binding)
+    #   2. Effect word put in the wrong field                   (inhibits → unknown)
+    # Extend this table as new variants appear in the logs.
+    _INTERACTION_TYPE_ALIASES: dict[str, str] = {
+        # sub-type → canonical category
+        "binding": "direct_binding",
+        "protein_binding": "direct_binding",
+        "physical_interaction": "direct_binding",
+        "physical_association": "proximal_association",
+        "association": "proximal_association",
+        "phosphorylation": "post_translational",
+        "phosphorylates": "post_translational",
+        "ubiquitination": "post_translational",
+        "ubiquitinates": "post_translational",
+        "acetylation": "post_translational",
+        "methylation": "post_translational",
+        "sumoylation": "post_translational",
+        "cleavage": "post_translational",
+        "proteolysis": "post_translational",
+        "transcription_regulation": "transcriptional",
+        "expression_regulation": "transcriptional",
+        "translation_regulation": "translational",
+        # effect words mistakenly placed in interaction_type field
+        "inhibits": "unknown",
+        "inhibition": "unknown",
+        "activates": "unknown",
+        "activation": "unknown",
+        "induces": "unknown",
+        "promotes": "unknown",
+        "suppresses": "unknown",
+        "upregulates": "unknown",
+        "downregulates": "unknown",
+        "regulates": "unknown",
+        "regulation": "unknown",
+        "modulates": "unknown",
+    }
+
+    # LLM-invented entity_type strings → valid EntityType values.
+    # Extend this table as new variants appear in the logs.
+    _ENTITY_TYPE_ALIASES: dict[str, str] = {
+        "tissue_cell_type": "cell_type",
+        "tissue": "cell_type",
+        "cell": "cell_type",
+        "organ": "cell_type",          # e.g. "lymph nodes" — closest valid type
+        "peptide": "molecule",         # short peptides behave like small molecules
+        "treatment": "unknown",
+        "drug": "molecule",
+        "small_molecule": "molecule",
+        "chemical": "molecule",
+        "compound": "molecule",
+        "protein_complex": "complex",
+        "mrna": "rna",
+        "mirna": "rna",
+        "lncrna": "rna",
+        "ncrna": "rna",
+    }
+
+    @classmethod
+    def _norm(cls, value: str | None, fallback: str = "unknown") -> str:
         """
         Normalise LLM enum output to match our StrEnum values.
-        Handles uppercase, spaces, and hyphens that local models sometimes emit.
-        e.g. "Direct Binding" → "direct_binding", "IN-VITRO" → "in_vitro"
+        Handles uppercase, spaces, and hyphens that local models sometimes emit,
+        then applies an alias table for invented type names.
+        e.g. "Direct Binding" → "direct_binding", "tissue_cell_type" → "cell_type"
         """
         if not value:
             return fallback
-        return value.lower().strip().replace(" ", "_").replace("-", "_")
+        normalised = value.lower().strip().replace(" ", "_").replace("-", "_")
+        return cls._ENTITY_TYPE_ALIASES.get(normalised, normalised)
+
+    @classmethod
+    def _norm_interaction_type(cls, value: str | None) -> str:
+        """Like _norm but applies the interaction_type alias table."""
+        if not value:
+            return "unknown"
+        normalised = value.lower().strip().replace(" ", "_").replace("-", "_")
+        return cls._INTERACTION_TYPE_ALIASES.get(normalised, normalised)
 
     @staticmethod
     def _norm_confidence(value: str | None) -> str:
@@ -337,7 +406,7 @@ class PaperExtractor:
                 interactions.append(ExtractedInteractionRaw(
                     entity_a=int_data["entity_a"],
                     entity_b=int_data["entity_b"],
-                    interaction_type=self._norm(int_data.get("interaction_type"), "unknown"),
+                    interaction_type=self._norm_interaction_type(int_data.get("interaction_type")),
                     direction=self._norm(int_data.get("direction"), "undirected"),
                     effect=int_data.get("effect") or None,
                     evidence_type=self._norm(int_data.get("evidence_type"), "unknown"),
