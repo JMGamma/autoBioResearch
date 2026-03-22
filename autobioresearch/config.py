@@ -27,11 +27,11 @@ class AppConfig(BaseSettings):
 
     # --- LLM tuning ---
     llm_temperature: float = 0.1
-    llm_max_tokens: int = 4096
+    llm_max_tokens: int = 8192   # output cap; extraction JSON is ~3-6k tokens even for large papers
     llm_requests_per_minute: int = 40
     llm_max_retries: int = 3
     llm_retry_backoff_seconds: float = 5.0
-    llm_timeout_seconds: Optional[int] = None  # None = no timeout (safe for slow local LLMs)
+    llm_timeout_seconds: Optional[int] = 600  # 10 min hard cap; kills runaway generation loops
 
     # --- Database ---
     db_path: str = "./autobioresearch.db"

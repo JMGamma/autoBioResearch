@@ -14,11 +14,11 @@ llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 
 # --- LLM tuning ---
 llm_temperature: 0.1
-llm_max_tokens: 262000
+llm_max_tokens: 8192          # output token cap — extraction JSON is ~3-6k tokens even for large papers
 llm_requests_per_minute: 40
 llm_max_retries: 3
 llm_retry_backoff_seconds: 5
-# llm_timeout_seconds: null  # null = no timeout (default); set to an integer (e.g. 3600) to cap
+llm_timeout_seconds: 600      # 10 min hard cap; kills runaway generation before Ollama drops the connection
 
 # --- Database ---
 db_path: "./autobioresearch.db"
