@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, select
 
 from autobioresearch import database as db
 from autobioresearch.config import AppConfig
+from autobioresearch import main as main_module
 from autobioresearch.main import run_fetch_phase
 from autobioresearch.metrics import compute_score
 from autobioresearch.extractor.verifier import InteractionVerifier
@@ -81,6 +82,48 @@ def _repos():
     db.create_all(engine)
     conn = engine.connect()
     return engine, conn, Repositories(conn)
+
+
+def test_first_shutdown_signal_requests_graceful_stop(caplog):
+    main_module._shutdown = False
+    main_module._shutdown_reason = "normal_exit"
+    main_module._shutdown_signal_count = 0
+    main_module._current_cycle = 3
+    main_module._current_phase = "extract"
+
+    with caplog.at_level("WARNING"):
+        main_module._handle_sigint(main_module.signal.SIGINT, None)
+
+    assert main_module._shutdown is True
+    assert main_module._shutdown_reason == "signal:SIGINT"
+    assert main_module._shutdown_signal_count == 1
+    assert "Shutdown requested via SIGINT during cycle=3 phase=extract" in caplog.text
+
+
+def test_second_shutdown_signal_forces_exit(monkeypatch, caplog):
+    main_module._shutdown = True
+    main_module._shutdown_reason = "signal:SIGINT"
+    main_module._shutdown_signal_count = 1
+    main_module._current_cycle = 3
+    main_module._current_phase = "sleep"
+
+    forced = {}
+
+    def _fake_exit(code: int):
+        forced["code"] = code
+        raise SystemExit(code)
+
+    monkeypatch.setattr(main_module.os, "_exit", _fake_exit)
+
+    with caplog.at_level("ERROR"):
+        try:
+            main_module._handle_sigint(main_module.signal.SIGINT, None)
+        except SystemExit as exc:
+            assert exc.code == 1
+
+    assert main_module._shutdown_reason == "forced_signal:SIGINT"
+    assert forced["code"] == 1
+    assert "Second shutdown signal received; forcing immediate exit" in caplog.text
 
 
 def test_investigating_conflicts_still_count_toward_score():

@@ -1,11 +1,11 @@
 """
 Reactome interaction fetcher.
 
-Streams the Reactome homo sapiens PSIMITAB interaction file and yields
+Streams the Reactome homo sapiens PSI-MITAB interaction file and yields
 RawReactomeInteraction records, one per valid line.
 
-File format: PSIMITAB 2.5 tab-delimited.
-Download URL: https://reactome.org/download/current/homo_sapiens.interactions.tab-delimited.txt
+Reactome moved these downloads under `/download/current/interactors/`.
+We prefer the current PSI-MITAB location and keep the legacy URL as a fallback.
 """
 from __future__ import annotations
 
@@ -21,9 +21,11 @@ from autobioresearch.utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-_REACTOME_URL = (
+_REACTOME_URLS = (
+    "https://reactome.org/download/current/interactors/"
+    "reactome.homo_sapiens.interactions.psi-mitab.txt",
     "https://reactome.org/download/current/"
-    "homo_sapiens.interactions.tab-delimited.txt"
+    "homo_sapiens.interactions.tab-delimited.txt",
 )
 
 # Regex to parse MI terms like: psi-mi:"MI:0915"(physical association)
@@ -98,12 +100,12 @@ class ReactomeInteractionFetcher:
 
     def __init__(
         self,
-        url: str = _REACTOME_URL,
+        url: str | None = None,
         requests_per_second: float = 1.0,
         timeout: int = 60,
         max_retries: int = 3,
     ):
-        self._url = url
+        self._urls = [url] if url else list(_REACTOME_URLS)
         self._limiter = RateLimiter(requests_per_second)
         self._timeout = timeout
         self._max_retries = max_retries
@@ -119,7 +121,7 @@ class ReactomeInteractionFetcher:
             logger.error("[Reactome] Could not download interaction file.")
             return
 
-        logger.info(f"[Reactome] Streaming {self._url}")
+        logger.info(f"[Reactome] Streaming {resp.url}")
         line_count = 0
         skip_count = 0
 
@@ -177,20 +179,24 @@ class ReactomeInteractionFetcher:
         )
 
     def _open_stream(self) -> Optional[requests.Response]:
-        for attempt in range(self._max_retries):
-            try:
-                self._limiter.acquire()
-                resp = self._session.get(self._url, stream=True, timeout=self._timeout)
-                if resp.status_code == 429:
-                    wait = float(resp.headers.get("Retry-After", 10))
-                    time.sleep(wait)
-                    continue
-                resp.raise_for_status()
-                return resp
-            except requests.RequestException as e:
-                if attempt < self._max_retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    logger.error(f"[Reactome] Download failed: {e}")
-                    return None
+        last_error: requests.RequestException | None = None
+        for url in self._urls:
+            for attempt in range(self._max_retries):
+                try:
+                    self._limiter.acquire()
+                    resp = self._session.get(url, stream=True, timeout=self._timeout)
+                    if resp.status_code == 429:
+                        wait = float(resp.headers.get("Retry-After", 10))
+                        time.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    return resp
+                except requests.RequestException as e:
+                    last_error = e
+                    if attempt < self._max_retries - 1:
+                        time.sleep(2 ** attempt)
+                    else:
+                        logger.warning(f"[Reactome] Download failed for {url}: {e}")
+        if last_error is not None:
+            logger.error(f"[Reactome] All download URLs failed. Last error: {last_error}")
         return None

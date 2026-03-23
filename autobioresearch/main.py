@@ -10,6 +10,7 @@ The score metric (entity*interaction density vs. conflict penalty) guides the lo
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import logging
 import os
@@ -38,15 +39,72 @@ from autobioresearch.utils.logging_config import setup_logging
 logger = logging.getLogger(__name__)
 
 _shutdown = False
+_shutdown_reason = "normal_exit"
+_shutdown_signal_count = 0
+_current_cycle = 0
+_current_phase = "startup"
+
+
+def _signal_name(sig: int) -> str:
+    try:
+        return signal.Signals(sig).name
+    except ValueError:
+        return str(sig)
+
+
+def _set_runtime_context(*, cycle: Optional[int] = None, phase: Optional[str] = None) -> None:
+    global _current_cycle, _current_phase
+    if cycle is not None:
+        _current_cycle = cycle
+    if phase is not None:
+        _current_phase = phase
+
+
+def _flush_log_handlers() -> None:
+    for handler in logging.getLogger().handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+
+
+def _log_shutdown_event(message: str, *, level: int = logging.WARNING) -> None:
+    logger.log(level, message)
+    _flush_log_handlers()
 
 
 def _handle_sigint(sig, frame):
-    # os._exit() terminates the process immediately at the OS level.
-    # This is the only approach that works on Windows when the main thread is
-    # blocked inside a C extension (e.g. httpx waiting for the LLM response).
-    # Per-paper commits mean the DB is consistent up to the last completed paper.
-    print("\nShutting down...", flush=True)
-    os._exit(0)
+    global _shutdown, _shutdown_reason, _shutdown_signal_count
+    _shutdown_signal_count += 1
+    sig_name = _signal_name(sig)
+
+    if _shutdown_signal_count == 1:
+        _shutdown = True
+        _shutdown_reason = f"signal:{sig_name}"
+        _log_shutdown_event(
+            "Shutdown requested via "
+            f"{sig_name} during cycle={_current_cycle or 'n/a'} phase={_current_phase}"
+        )
+        print("\nShutdown requested. Finishing current work where possible...", flush=True)
+        return
+
+    # A second signal is treated as a force-exit request.
+    _shutdown_reason = f"forced_signal:{sig_name}"
+    _log_shutdown_event(
+        "Second shutdown signal received; forcing immediate exit "
+        f"via {sig_name} during cycle={_current_cycle or 'n/a'} phase={_current_phase}",
+        level=logging.ERROR,
+    )
+    print("\nForcing immediate shutdown...", flush=True)
+    os._exit(1)
+
+
+def _log_process_exit() -> None:
+    _log_shutdown_event(
+        "Process exiting with reason="
+        f"{_shutdown_reason} cycle={_current_cycle or 'n/a'} phase={_current_phase}",
+        level=logging.INFO,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -433,30 +491,36 @@ def run_cycle(
 
     with engine.connect() as conn:
         repos = Repositories(conn)
+        _set_runtime_context(cycle=cycle, phase="cycle_start")
 
         logger.info(f"{'='*60}")
         logger.info(f"CYCLE {cycle} START")
         logger.info(f"{'='*60}")
 
         # --- Phase 0: Seed if needed ---
+        _set_runtime_context(phase="seed_queries")
         _seed_initial_queries(repos, config)
         conn.commit()
 
         # --- Phase 0.5: plan pending work ---
         if planner:
+            _set_runtime_context(phase="plan_queries")
             planner.plan_pending_queries(repos, config)
             conn.commit()
 
         # --- Phase 1: Fetch papers ---
+        _set_runtime_context(phase="fetch_papers")
         fetch_stats = run_fetch_phase(repos, config, pubmed, s2)
         conn.commit()
 
         # --- Phase 2: Upgrade to full text (transient) ---
+        _set_runtime_context(phase="fetch_full_text")
         run_full_text_phase(repos, config, pmc_fetcher)
         conn.commit()
 
         # --- Phase 3: Extract ---
         # conn is passed so run_extraction_phase can commit after each paper.
+        _set_runtime_context(phase="extract")
         extraction_stats = run_extraction_phase(
             repos, config, extractor, pmc_fetcher, conn
         )
@@ -465,26 +529,32 @@ def run_cycle(
         new_conflicts = 0
         conflicts_resolved = 0
         if conflict_detector:
+            _set_runtime_context(phase="detect_conflicts")
             new_conflicts = conflict_detector.detect(repos, config)
             conn.commit()
 
         # --- Phase 5: Classify + resolve conflicts ---
         if conflict_resolver:
+            _set_runtime_context(phase="resolve_conflicts")
             conflicts_resolved = conflict_resolver.analyze_and_resolve(repos, config)
             conn.commit()
+            _set_runtime_context(phase="generate_resolution_queries")
             resolution_queries = conflict_resolver.generate_follow_up_queries(repos, config)
             conn.commit()
         else:
             resolution_queries = 0
 
+        _set_runtime_context(phase="verify_claims")
         verification_stats = run_verification_phase(repos, config, verifier)
         conn.commit()
 
         # --- Phase 6: Generate targeted next-step queries ---
+        _set_runtime_context(phase="generate_targeted_queries")
         gap_queries = run_query_generation_phase(repos, config, planner) if planner else 0
         conn.commit()
 
         # --- Phase 7: Score ---
+        _set_runtime_context(phase="score")
         score, stats = compute_score(repos, config)
         repos.metrics.log(
             cycle=cycle,
@@ -527,9 +597,22 @@ def main():
         config.max_cycles = args.cycles
 
     setup_logging(config.log_level, config.log_file)
+    atexit.register(_log_process_exit)
     signal.signal(signal.SIGINT, _handle_sigint)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _handle_sigint)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_sigint)
 
     logger.info("AutoBioResearch starting up")
+    logger.info(
+        "Process info | pid=%s ppid=%s python=%s cwd=%s argv=%s",
+        os.getpid(),
+        os.getppid(),
+        sys.executable,
+        os.getcwd(),
+        json.dumps(sys.argv),
+    )
     logger.info(f"LLM: {config.llm_api_type} / {config.llm_model}")
     logger.info(f"Database: {config.db_path}")
 
@@ -590,6 +673,7 @@ def main():
         cycle += 1
 
         try:
+            _set_runtime_context(cycle=cycle, phase="run_cycle")
             stats = run_cycle(
                 cycle=cycle,
                 config=config,
@@ -612,6 +696,7 @@ def main():
             break
 
         if not _shutdown:
+            _set_runtime_context(cycle=cycle, phase="sleep")
             logger.info(f"Sleeping {config.cycle_sleep_seconds}s until next cycle...")
             # Sleep in small increments to allow clean shutdown
             for _ in range(config.cycle_sleep_seconds):
@@ -619,7 +704,8 @@ def main():
                     break
                 time.sleep(1)
 
-    logger.info("AutoBioResearch stopped.")
+    _set_runtime_context(phase="stopped")
+    logger.info(f"AutoBioResearch stopped. reason={_shutdown_reason}")
 
 
 if __name__ == "__main__":
