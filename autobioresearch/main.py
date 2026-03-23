@@ -31,6 +31,7 @@ from autobioresearch.extractor.extractor import PaperExtractor
 from autobioresearch.extractor.normalizer import EntityNormalizer
 from autobioresearch.extractor.verifier import InteractionVerifier
 from autobioresearch.metrics import compute_score
+from autobioresearch.perturbation.sign_map import unmapped_effect_summary
 from autobioresearch.models import ExtractedInteractionRaw, QueryType, SearchQuery
 from autobioresearch.planner import QueryPlanner
 from autobioresearch.storage.repositories import Repositories
@@ -577,6 +578,23 @@ def run_cycle(
             **stats,
         )
         conn.commit()
+
+        # --- Effect sign-map coverage check ---
+        # Logs unmapped effect strings so we can spot when a new batch warrants a pass.
+        _set_runtime_context(phase="signmap_check")
+        sm = unmapped_effect_summary(conn)
+        if sm["total_unmapped_interactions"] > 0:
+            top_str = ", ".join(
+                f"'{x['effect']}'×{x['count']}" for x in sm["top_unmapped"]
+            )
+            logger.info(
+                "Sign-map coverage: %d interactions / %d distinct effects unmapped. Top: %s",
+                sm["total_unmapped_interactions"],
+                sm["distinct_unmapped_effects"],
+                top_str,
+            )
+        else:
+            logger.debug("Sign-map coverage: all effect strings mapped.")
 
     return {"cycle": cycle, "score": score, **stats}
 

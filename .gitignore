@@ -60,6 +60,12 @@ desktop.ini
 .coverage
 htmlcov/
 
-# --- Local planning notes ---
-ROADMAP_REVIEW.md
-PUBLIC_DATA_IMPLEMENTATION_PLAN.md
+# --- gstack artifacts ---
+DESIGN.md
+.gstack/
+
+# --- Implementation plans, roadmaps, and design reviews ---
+*PLAN*.md
+*ROADMAP*.md
+*_REVIEW.md
+*_DESIGN.md

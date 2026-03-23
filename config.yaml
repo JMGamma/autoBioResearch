@@ -52,6 +52,11 @@ entity_resolution_enabled: true
 entity_resolution_requests_per_second: 3.0
 entity_resolution_timeout: 10
 
+# --- Perturbation ---
+# Exponent α in multi-path score combination: 1 - ∏(1 - |xᵢ|^α)
+# Lower α → paths combine more aggressively. Range (0, 1]. Default 0.55.
+perturbation_combination_exponent: 0.55
+
 # --- Scoring ---
 # score = (N_entities * N_interactions) / (1 + penalty * weighted_conflict_sum)
 # penalty_weight per conflict type: true=1.0, ambiguous=0.5, context_dependent=0.2

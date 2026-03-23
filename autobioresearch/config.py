@@ -65,6 +65,9 @@ class AppConfig(BaseSettings):
     entity_resolution_requests_per_second: float = 3.0
     entity_resolution_timeout: int = 10
 
+    # --- Perturbation ---
+    perturbation_combination_exponent: float = 0.55  # α in: 1 - ∏(1 - |xᵢ|^α) multi-path score combination
+
     # --- Scoring ---
     penalty: float = 2.0
 
