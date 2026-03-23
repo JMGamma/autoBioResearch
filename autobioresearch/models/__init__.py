@@ -3,6 +3,7 @@ from .interaction import (
     EvidenceRecord,
     ExtractedInteractionRaw,
     Interaction,
+    LiteralClaimRecord,
     InteractionType,
     EvidenceType,
     InteractionContext,
@@ -20,6 +21,7 @@ Paper.model_rebuild()
 __all__ = [
     "BiologicalEntity", "EntityType", "ExtractedEntityRaw",
     "EvidenceRecord", "ExtractedInteractionRaw", "Interaction",
+    "LiteralClaimRecord",
     "InteractionType", "EvidenceType", "InteractionContext",
     "ExtractionResult", "ExtractionStatus", "FetchStatus", "Paper",
     "Conflict", "ConflictAnalysisOutput", "ConflictStatus", "ConflictType", "PENALTY_WEIGHTS",

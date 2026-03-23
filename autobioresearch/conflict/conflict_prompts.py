@@ -8,20 +8,27 @@ determine whether two scientific claims about biological interactions genuinely 
 each other, or whether apparent contradictions are explained by experimental context differences.
 
 KEY DISTINCTIONS:
-- TRUE_CONFLICT: Same organism, same cell type, same conditions, opposing conclusions that \
-  cannot be explained by methodological differences. This is a real scientific controversy.
-- CONTEXT_DEPENDENT: Different organisms, cell lines, disease states, concentrations, or \
-  assay conditions that could biologically explain divergent results. NOT a true conflict — \
-  biology is context-dependent by nature.
-- AMBIGUOUS: Insufficient context to classify. Needs more experimental data to resolve.
+- CONTEXT_DEPENDENT: The divergent results are explained by biological differences in the \
+  experimental context — different organisms, cell lines, disease states, concentrations, \
+  assay conditions, isoforms, mutation status, feedback states, or any other factor that \
+  could biologically account for the different outcomes. Both results are valid in their \
+  respective contexts. This is the MOST COMMON explanation for apparent conflicts in biology.
+- AMBIGUOUS: There is insufficient metadata to determine whether context explains the \
+  difference. The discrepancy might be context-dependent but we cannot confirm without \
+  more data.
+- TRUE_CONFLICT: Identical or near-identical conditions (same organism, cell type, \
+  concentration range, assay methodology) with directly opposing conclusions that cannot \
+  be explained by any known biological mechanism. This should be rare — exhaust context \
+  explanations before using this classification.
 
-IMPORTANT CONSIDERATIONS:
-- Species differences (mouse vs. human) are expected and not true conflicts.
-- Concentration-dependent effects (activation at low dose, inhibition at high dose) are normal.
-- Cell-type-specific effects are common and not inherently contradictory.
-- Assay artifacts can cause false results — consider whether the methods are comparable.
-- Publication year matters: newer structural data may supersede older biochemical claims.
-- Consider whether one claim might be an indirect effect and the other a direct one.
+IMPORTANT: Biology is inherently context-dependent. Before classifying as TRUE_CONFLICT, \
+actively consider:
+- Could isoform, splice variant, or paralog differences explain the result?
+- Could concentration/dose-response explain a sign reversal?
+- Could disease state vs. normal tissue differ in relevant co-factors or feedback?
+- Could one study measure a direct effect and the other a downstream consequence?
+- Could assay sensitivity or temporal resolution differ in a meaningful way?
+- Publication year: does one paper use higher-resolution methodology?
 """
 
 CONFLICT_ANALYSIS_TOOL = {
@@ -86,17 +93,42 @@ CONFLICT_ANALYSIS_FUNCTION = {
 
 
 QUERY_GENERATION_SYSTEM_PROMPT = """\
-You are an expert in biological literature search. Your task is to generate specific, \
-targeted search queries that will find papers resolving a scientific conflict between \
-two biological interaction claims.
+You are an expert in biological literature search. Two papers report conflicting results \
+for the same biological interaction. Your task is to generate targeted search queries \
+that will find papers shedding light on this discrepancy.
 
-Guidelines for good queries:
-- Use specific protein/gene/molecule names rather than general terms
-- Include MeSH terms in brackets for PubMed: [Title/Abstract], [MeSH Terms]
-- Use Boolean operators: AND, OR, NOT
-- For Semantic Scholar queries, use natural language descriptions
-- Queries should be narrow enough to be relevant but broad enough to find papers
-- Consider both the mechanism of the interaction and the broader biological context
+A valid resolution can take two forms — keep BOTH in mind when designing queries:
+1. CONTEXT EXPLANATION: A biological mechanism that explains why both results are correct \
+   in different conditions — e.g. isoform-specific effects, concentration-dependent \
+   biphasic responses, feedback loops that differ by cell state, splice variants, \
+   post-translational modification status, co-factor availability, or disease-stage effects. \
+   Finding this is often more valuable than invalidating one paper.
+2. ADJUDICATION: Papers with higher-resolution methods (structural, genetic, in vivo) that \
+   directly test which claim is correct under comparable conditions.
+
+Design a mix of queries covering both possibilities. Use specific protein/gene/molecule \
+names, MeSH terms in brackets for PubMed, Boolean operators, and natural language for \
+Semantic Scholar. Prefer mechanistic and review papers over descriptive studies.
+"""
+
+CONTEXT_ENRICHMENT_SYSTEM_PROMPT = """\
+You are an expert in biological literature search. Two papers report the same biological \
+interaction producing different outcomes depending on experimental context (cell type, \
+tissue, organism, condition, etc.). This is expected in biology — the same pathway can \
+behave very differently in different contexts.
+
+Your task is to generate search queries that will find papers explaining WHY this \
+context-dependence exists. The goal is NOT to invalidate either claim, but to find \
+mechanistic explanations for the context-sensitivity: isoform differences, co-factor \
+availability, chromatin state, feedback loops, alternative splicing, post-translational \
+modifications, or other biological reasons the interaction behaves differently across contexts.
+
+Guidelines:
+- Focus on mechanistic "why" questions, not "which result is correct"
+- Search for the specific contextual factors that differ between the two claims
+- Look for review articles on context-dependent regulation of these entities
+- Use specific protein/gene/molecule names
+- Include MeSH terms for PubMed queries
 """
 
 QUERY_GENERATION_TOOL = {
@@ -144,5 +176,25 @@ QUERY_GENERATION_FUNCTION = {
         "name": QUERY_GENERATION_TOOL["name"],
         "description": QUERY_GENERATION_TOOL["description"],
         "parameters": QUERY_GENERATION_TOOL["input_schema"],
+    }
+}
+
+# Context-enrichment tool shares the same schema as query generation —
+# only the system prompt differs (mechanistic "why" framing vs. resolution framing).
+CONTEXT_ENRICHMENT_TOOL = {
+    "name": "generate_queries",
+    "description": (
+        "Generate search queries to find papers explaining WHY this biological interaction "
+        "is context-dependent — the mechanistic basis for the context-sensitivity"
+    ),
+    "input_schema": QUERY_GENERATION_TOOL["input_schema"],
+}
+
+CONTEXT_ENRICHMENT_FUNCTION = {
+    "type": "function",
+    "function": {
+        "name": CONTEXT_ENRICHMENT_TOOL["name"],
+        "description": CONTEXT_ENRICHMENT_TOOL["description"],
+        "parameters": CONTEXT_ENRICHMENT_TOOL["input_schema"],
     }
 }

@@ -17,9 +17,21 @@ class SearchQuery(BaseModel):
     source_api: str                          # pubmed | semantic_scholar | arxiv
     query_type: QueryType
     origin: str                              # "seed" | "conflict_id:<uuid>" | "entity_id:<uuid>"
+    generation_reason: Optional[str] = None
+    target_kind: Optional[str] = None        # entity | interaction | conflict
+    target_id: Optional[str] = None
+    planning_score: float = 0.0
+    planning_factors: dict = Field(default_factory=dict)
     status: str = "pending"                  # pending | running | done | failed
     papers_found: int = 0
     papers_new: int = 0
+    outcome_papers_processed: int = 0
+    outcome_new_interactions: int = 0
+    outcome_new_evidence: int = 0
+    attributed_papers_processed: float = 0.0
+    attributed_new_interactions: float = 0.0
+    attributed_new_evidence: float = 0.0
+    improved_graph: Optional[bool] = None
     executed_at: Optional[str] = None
 
 

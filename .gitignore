@@ -40,6 +40,9 @@ logs/
 *.graphml
 graph.json
 
+# --- Generated audit/report artifacts ---
+*_audit.txt
+
 # --- IDE ---
 .vscode/
 .idea/
@@ -56,3 +59,6 @@ desktop.ini
 .pytest_cache/
 .coverage
 htmlcov/
+
+# --- Local planning notes ---
+ROADMAP_REVIEW.md

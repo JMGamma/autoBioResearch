@@ -9,12 +9,15 @@ from typing import Optional
 
 from autobioresearch.config import AppConfig
 from autobioresearch.extractor.claude_client import LLMClient
+from autobioresearch.extractor.evidence_normalizer import EvidenceNormalizer
 from autobioresearch.extractor.extraction_prompts import (
     EXTRACTION_FUNCTION,
     EXTRACTION_SYSTEM_PROMPT,
     EXTRACTION_TOOL,
 )
 from autobioresearch.extractor.normalizer import EntityNormalizer
+from autobioresearch.extractor.verifier import InteractionVerifier
+from autobioresearch.conflict.adjudicator import EvidenceAdjudicator
 from autobioresearch.models import (
     EvidenceRecord,
     EvidenceType,
@@ -24,6 +27,7 @@ from autobioresearch.models import (
     Interaction,
     InteractionContext,
     InteractionType,
+    LiteralClaimRecord,
 )
 from autobioresearch.storage.repositories import Repositories
 from autobioresearch.utils.text_utils import (
@@ -76,6 +80,9 @@ class PaperExtractor:
         self._config = config
         self._llm = llm
         self._normalizer = normalizer
+        self._verifier = InteractionVerifier(config=config, llm=llm)
+        self._evidence_normalizer = EvidenceNormalizer()
+        self._adjudicator = EvidenceAdjudicator()
 
     def extract(self, paper_id: str, title: str, text: str) -> ExtractionResult:
         """
@@ -123,6 +130,12 @@ class PaperExtractor:
 
         # Deduplicate interactions by (entity_a, entity_b, type, effect, snippet_prefix)
         all_interactions = self._deduplicate_interactions(all_interactions)
+        all_interactions = [
+            self._evidence_normalizer.normalize(
+                self._verifier.verify_interaction(paper_id, title, text, interaction)
+            )
+            for interaction in all_interactions
+        ]
 
         return ExtractionResult(
             paper_id=paper_id,
@@ -191,8 +204,33 @@ class PaperExtractor:
             if is_new:
                 new_interactions += 1
 
+            claim_id = repos.literal_claims.insert(
+                LiteralClaimRecord(
+                    paper_id=result.paper_id,
+                    entity_a_text=raw_int.entity_a,
+                    entity_b_text=raw_int.entity_b,
+                    interaction_type_text=str(raw_int.interaction_type),
+                    direction_text=raw_int.direction,
+                    effect_text=raw_int.effect,
+                    evidence_type_text=str(raw_int.evidence_type),
+                    organism_text=raw_int.organism,
+                    tissue_cell_type_text=raw_int.tissue_cell_type,
+                    condition_text=raw_int.condition,
+                    assay_type_text=raw_int.assay_type,
+                    evidence_subtype_text=raw_int.evidence_subtype,
+                    confidence_text=raw_int.confidence,
+                    confidence_score=raw_int.confidence_score,
+                    snippet=raw_int.snippet,
+                    reasoning=raw_int.reasoning,
+                    verification_status=raw_int.verification_status,
+                    verification_score=raw_int.verification_score,
+                    verification_notes=raw_int.verification_notes,
+                )
+            )
+
             # Insert evidence record
             ev = EvidenceRecord(
+                claim_id=claim_id,
                 interaction_id=interaction_id,
                 paper_id=result.paper_id,
                 evidence_type=raw_int.evidence_type,
@@ -204,9 +242,29 @@ class PaperExtractor:
                     condition=raw_int.condition,
                     assay_type=raw_int.assay_type,
                     evidence_subtype=raw_int.evidence_subtype,
+                    normalized_organism=raw_int.normalized_organism,
+                    normalized_tissue_cell_type=raw_int.normalized_tissue_cell_type,
+                    normalized_condition=raw_int.normalized_condition,
+                    normalized_assay_type=raw_int.normalized_assay_type,
                 ),
                 snippet=raw_int.snippet,
+                verification_status=raw_int.verification_status,
+                verification_score=raw_int.verification_score,
+                verification_notes=raw_int.verification_notes,
             )
+            adjudication_score, adjudication_notes = self._adjudicator.adjudicate(
+                {
+                    "evidence_type": ev.evidence_type.value,
+                    "verification_score": ev.verification_score,
+                    "normalized_organism": ev.context.normalized_organism,
+                    "normalized_tissue_cell_type": ev.context.normalized_tissue_cell_type,
+                    "normalized_condition": ev.context.normalized_condition,
+                    "snippet": ev.snippet,
+                },
+                paper_row=None,
+            )
+            ev.adjudication_score = adjudication_score
+            ev.adjudication_notes = adjudication_notes
             is_new_ev = repos.evidence.insert(ev)
             if is_new_ev:
                 new_evidence += 1

@@ -10,6 +10,7 @@ The score metric (entity*interaction density vs. conflict penalty) guides the lo
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import signal
@@ -27,8 +28,10 @@ from autobioresearch.database import create_all, init_engine
 from autobioresearch.extractor.claude_client import LLMClient
 from autobioresearch.extractor.extractor import PaperExtractor
 from autobioresearch.extractor.normalizer import EntityNormalizer
+from autobioresearch.extractor.verifier import InteractionVerifier
 from autobioresearch.metrics import compute_score
-from autobioresearch.models import QueryType, SearchQuery
+from autobioresearch.models import ExtractedInteractionRaw, QueryType, SearchQuery
+from autobioresearch.planner import QueryPlanner
 from autobioresearch.storage.repositories import Repositories
 from autobioresearch.utils.logging_config import setup_logging
 
@@ -77,22 +80,23 @@ def _fetch_papers_for_query(
     query_row: dict,
     pubmed: PubMedCrawler,
     s2: SemanticScholarCrawler,
-) -> list:
+) -> tuple[bool, list]:
     """Fetch papers for a single query. Thread-safe (no DB writes)."""
     q_text = query_row["query_text"]
     api = query_row["source_api"]
+    max_results = int(query_row.get("papers_per_query", 0) or 0)
 
     try:
         if api == "pubmed":
-            return pubmed.search(q_text)
+            return True, pubmed.search(q_text, max_results=max_results)
         elif api == "semantic_scholar":
-            return s2.search(q_text)
+            return True, s2.search(q_text, max_results=max_results)
         else:
             logger.warning(f"Unknown source_api: {api}, defaulting to pubmed")
-            return pubmed.search(q_text)
+            return True, pubmed.search(q_text, max_results=max_results)
     except Exception as e:
         logger.warning(f"Fetch failed for query '{q_text}' on {api}: {e}")
-        return []
+        return False, []
 
 
 def run_fetch_phase(
@@ -100,11 +104,20 @@ def run_fetch_phase(
     config: AppConfig,
     pubmed: PubMedCrawler,
     s2: SemanticScholarCrawler,
-) -> int:
-    """Fetch papers for pending queries. Returns count of newly inserted papers."""
+) -> dict:
+    """Fetch papers for pending queries. Returns fetch telemetry for the cycle."""
     pending = repos.queries.get_pending(config.queries_per_cycle)
     if not pending:
-        return 0
+        return {
+            "queries_run": 0,
+            "queries_failed": 0,
+            "queries_with_new_papers": 0,
+            "papers_fetched_total": 0,
+            "papers_fetched_new": 0,
+        }
+
+    for q in pending:
+        q["papers_per_query"] = config.papers_per_query
 
     logger.info(f"Fetching papers for {len(pending)} queries")
 
@@ -113,6 +126,7 @@ def run_fetch_phase(
         repos.queries.mark_running(q["id"])
 
     papers_by_query: dict[str, list] = {}
+    fetch_success_by_query: dict[str, bool] = {}
 
     # Fetch in parallel
     with ThreadPoolExecutor(max_workers=config.crawler_threads) as executor:
@@ -123,16 +137,21 @@ def run_fetch_phase(
         for future in as_completed(future_to_query):
             q = future_to_query[future]
             try:
-                papers = future.result()
+                success, papers = future.result()
+                fetch_success_by_query[q["id"]] = success
                 papers_by_query[q["id"]] = papers
             except Exception as e:
                 logger.warning(f"Query {q['id']} fetch raised: {e}")
+                fetch_success_by_query[q["id"]] = False
                 papers_by_query[q["id"]] = []
 
     # Persist papers and update query statuses
     total_new = 0
     for q in pending:
         papers = papers_by_query.get(q["id"], [])
+        if not fetch_success_by_query.get(q["id"], False):
+            repos.queries.mark_failed(q["id"], error="fetch_failed")
+            continue
         for p in papers:
             p.query_ids = [q["id"]]
 
@@ -140,8 +159,21 @@ def run_fetch_phase(
         total_new += new_count
         repos.queries.mark_done(q["id"], papers_found=len(papers), papers_new=new_count)
 
-    logger.info(f"Fetched {sum(len(v) for v in papers_by_query.values())} papers total, {total_new} new")
-    return total_new
+    papers_total = sum(len(v) for v in papers_by_query.values())
+    queries_failed = sum(1 for ok in fetch_success_by_query.values() if not ok)
+    queries_with_new_papers = sum(
+        1
+        for q in pending
+        if fetch_success_by_query.get(q["id"], False) and len(papers_by_query.get(q["id"], [])) > 0
+    )
+    logger.info(f"Fetched {papers_total} papers total, {total_new} new")
+    return {
+        "queries_run": len(pending),
+        "queries_failed": queries_failed,
+        "queries_with_new_papers": queries_with_new_papers,
+        "papers_fetched_total": papers_total,
+        "papers_fetched_new": total_new,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -188,15 +220,25 @@ def run_extraction_phase(
     extractor: PaperExtractor,
     pmc_fetcher: PMCFullTextFetcher,
     conn,
-) -> tuple[int, int, int, int]:
+) -> dict:
     """
     Extract entities/interactions from pending papers.
-    Returns (papers_processed, new_entities, new_interactions, new_evidence).
+    Returns extraction telemetry for the cycle.
     Commits after each paper so data is visible in the DB progressively.
     """
     pending = repos.papers.get_pending_extraction(config.papers_per_cycle)
     if not pending:
-        return 0, 0, 0, 0
+        return {
+            "papers_processed": 0,
+            "papers_failed": 0,
+            "new_entities": 0,
+            "new_interactions": 0,
+            "new_evidence": 0,
+            "claims_verified": 0,
+            "claims_needing_review": 0,
+            "query_linked_evidence": 0,
+            "conflicts_reopened": 0,
+        }
 
     # Refresh the normalizer's DB connection — the one used at construction is closed.
     extractor._normalizer.set_repo(repos.entities)
@@ -204,9 +246,14 @@ def run_extraction_phase(
     logger.info(f"Extracting from {len(pending)} papers")
 
     papers_processed = 0
+    papers_failed = 0
     total_entities = 0
     total_interactions = 0
     total_evidence = 0
+    claims_verified = 0
+    claims_needing_review = 0
+    query_linked_evidence = 0
+    conflicts_reopened = 0
 
     for paper_row in pending:
         if _shutdown:
@@ -230,6 +277,7 @@ def run_extraction_phase(
 
         if not text or len(text.strip()) < 50:
             repos.papers.mark_extraction_failed(paper_id, "Insufficient text")
+            papers_failed += 1
             continue
 
         try:
@@ -240,12 +288,34 @@ def run_extraction_phase(
             )
             logger.info(msg)
             ne, ni, nev = extractor.persist(result, repos)
+            interaction_ids = list({
+                ev["interaction_id"]
+                for ev in repos.evidence.get_for_paper(result.paper_id)
+            })
+            conflicts_reopened += repos.conflicts.reopen_for_interactions(interaction_ids)
 
             repos.papers.mark_extraction_done(paper_id, raw_llm_response=None)
             papers_processed += 1
             total_entities += ne
             total_interactions += ni
             total_evidence += nev
+            claims_verified += sum(
+                1 for ev in repos.evidence.get_for_paper(result.paper_id)
+                if ev.get("verification_status") == "verified"
+            )
+            claims_needing_review += sum(
+                1 for ev in repos.evidence.get_for_paper(result.paper_id)
+                if ev.get("verification_status") == "needs_review"
+            )
+            query_ids = json.loads(paper_row.get("query_ids") or "[]")
+            if query_ids:
+                query_linked_evidence += nev
+                repos.queries.record_outcomes(
+                    query_ids,
+                    papers_processed=1,
+                    new_interactions=ni,
+                    new_evidence=nev,
+                )
 
             logger.info(
                 f"  {paper_id}: +{ne} entities, +{ni} interactions, +{nev} evidence"
@@ -255,46 +325,91 @@ def run_extraction_phase(
         except Exception as e:
             logger.error(f"Extraction failed for {paper_id}: {e}", exc_info=True)
             repos.papers.mark_extraction_failed(paper_id, str(e)[:2000])
+            papers_failed += 1
 
         # Commit after each paper so data is visible immediately and a later
         # crash doesn't lose the whole batch.
         conn.commit()
 
-    return papers_processed, total_entities, total_interactions, total_evidence
+    return {
+        "papers_processed": papers_processed,
+        "papers_failed": papers_failed,
+        "new_entities": total_entities,
+        "new_interactions": total_interactions,
+        "new_evidence": total_evidence,
+        "claims_verified": claims_verified,
+        "claims_needing_review": claims_needing_review,
+        "query_linked_evidence": query_linked_evidence,
+        "conflicts_reopened": conflicts_reopened,
+    }
 
 
 # ---------------------------------------------------------------------------
-# Query generation for entity gaps
+# Query generation for score-driven targeted search
 # ---------------------------------------------------------------------------
 
-def run_gap_filling_phase(repos: Repositories, config: AppConfig) -> int:
-    """
-    Generate simple expansion queries for entities with few interactions.
-    No LLM needed — template-based.
-    Returns count of queries added.
-    """
-    low_coverage = repos.entities.get_low_interaction_entities(
-        config.min_interactions_per_entity, limit=20
-    )
-    added = 0
-    for entity in low_coverage:
-        name = entity["canonical_name"]
-        entity_type = entity["entity_type"]
-        entity_id = entity["id"]
-
-        query_text = f'"{name}"[Title/Abstract] AND ({entity_type} interactions OR binding OR signaling)'
-        query = SearchQuery(
-            query_text=query_text,
-            source_api="pubmed",
-            query_type=QueryType.ENTITY_EXPANSION,
-            origin=f"entity_id:{entity_id}",
-        )
-        repos.queries.insert(query)
-        added += 1
-
+def run_query_generation_phase(repos: Repositories, config: AppConfig, planner: QueryPlanner) -> int:
+    """Generate targeted score-aware queries for the next cycle."""
+    added = planner.generate_targeted_queries(repos, config)
     if added:
-        logger.info(f"Added {added} entity-expansion queries for low-coverage entities")
+        logger.info(f"Added {added} targeted search queries")
     return added
+
+
+def run_verification_phase(
+    repos: Repositories,
+    config: AppConfig,
+    verifier: InteractionVerifier | None,
+) -> dict:
+    """
+    Re-verify unresolved conflict-linked evidence using stored paper text/snippets.
+    Returns verifier telemetry for this phase.
+    """
+    if verifier is None or not config.verification_enabled:
+        return {"claims_verified": 0, "claims_needing_review": 0}
+
+    candidates = repos.evidence.get_conflict_verification_candidates(
+        limit=config.claims_to_verify_per_cycle
+    )
+    if not candidates:
+        return {"claims_verified": 0, "claims_needing_review": 0}
+
+    verified = 0
+    needs_review = 0
+    for row in candidates:
+        interaction = ExtractedInteractionRaw(
+            entity_a=row["entity_a_name"],
+            entity_b=row["entity_b_name"],
+            interaction_type=row["interaction_type"],
+            direction=row.get("direction") or "undirected",
+            effect=row.get("effect"),
+            evidence_type="unknown",
+            organism=row.get("organism"),
+            tissue_cell_type=row.get("tissue_cell_type"),
+            condition=row.get("condition"),
+            confidence=row.get("confidence") or "low",
+            confidence_score=float(row.get("confidence_score") or 0.0),
+            snippet=row.get("snippet") or "",
+        )
+        verified_interaction = verifier.verify_interaction(
+            row["paper_id"],
+            row.get("paper_title") or "",
+            row.get("paper_abstract") or "",
+            interaction,
+            conflict_linked=True,
+        )
+        repos.evidence.update_verification(
+            row["evidence_id"],
+            status=verified_interaction.verification_status or "needs_review",
+            score=verified_interaction.verification_score,
+            notes=verified_interaction.verification_notes,
+        )
+        if verified_interaction.verification_status == "verified":
+            verified += 1
+        else:
+            needs_review += 1
+
+    return {"claims_verified": verified, "claims_needing_review": needs_review}
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +426,8 @@ def run_cycle(
     extractor: PaperExtractor,
     conflict_detector=None,
     conflict_resolver=None,
+    verifier: InteractionVerifier | None = None,
+    planner: QueryPlanner | None = None,
 ) -> dict:
     """Run one full autoresearch cycle. Returns cycle stats."""
 
@@ -325,8 +442,13 @@ def run_cycle(
         _seed_initial_queries(repos, config)
         conn.commit()
 
+        # --- Phase 0.5: plan pending work ---
+        if planner:
+            planner.plan_pending_queries(repos, config)
+            conn.commit()
+
         # --- Phase 1: Fetch papers ---
-        new_papers = run_fetch_phase(repos, config, pubmed, s2)
+        fetch_stats = run_fetch_phase(repos, config, pubmed, s2)
         conn.commit()
 
         # --- Phase 2: Upgrade to full text (transient) ---
@@ -335,7 +457,7 @@ def run_cycle(
 
         # --- Phase 3: Extract ---
         # conn is passed so run_extraction_phase can commit after each paper.
-        papers_done, new_ents, new_ints, new_ev = run_extraction_phase(
+        extraction_stats = run_extraction_phase(
             repos, config, extractor, pmc_fetcher, conn
         )
 
@@ -350,23 +472,38 @@ def run_cycle(
         if conflict_resolver:
             conflicts_resolved = conflict_resolver.analyze_and_resolve(repos, config)
             conn.commit()
-            resolution_queries = conflict_resolver.generate_resolution_queries(repos, config)
+            resolution_queries = conflict_resolver.generate_follow_up_queries(repos, config)
             conn.commit()
+        else:
+            resolution_queries = 0
 
-        # --- Phase 6: Gap-filling queries ---
-        run_gap_filling_phase(repos, config)
+        verification_stats = run_verification_phase(repos, config, verifier)
+        conn.commit()
+
+        # --- Phase 6: Generate targeted next-step queries ---
+        gap_queries = run_query_generation_phase(repos, config, planner) if planner else 0
         conn.commit()
 
         # --- Phase 7: Score ---
         score, stats = compute_score(repos, config)
         repos.metrics.log(
             cycle=cycle,
-            papers_processed=papers_done,
-            new_entities=new_ents,
-            new_interactions=new_ints,
-            new_evidence=new_ev,
+            papers_processed=extraction_stats["papers_processed"],
+            papers_fetched_total=fetch_stats["papers_fetched_total"],
+            papers_fetched_new=fetch_stats["papers_fetched_new"],
+            papers_extraction_failed=extraction_stats["papers_failed"],
+            new_entities=extraction_stats["new_entities"],
+            new_interactions=extraction_stats["new_interactions"],
+            new_evidence=extraction_stats["new_evidence"],
+            evidence_accepted=extraction_stats["new_evidence"],
+            claims_verified=extraction_stats["claims_verified"] + verification_stats["claims_verified"],
+            claims_needing_review=extraction_stats["claims_needing_review"] + verification_stats["claims_needing_review"],
             new_conflicts=new_conflicts,
+            conflicts_reopened=extraction_stats["conflicts_reopened"],
             conflicts_resolved=conflicts_resolved,
+            queries_generated=resolution_queries + gap_queries,
+            queries_with_new_papers=fetch_stats["queries_with_new_papers"],
+            query_linked_evidence=extraction_stats["query_linked_evidence"],
             **stats,
         )
         conn.commit()
@@ -435,6 +572,8 @@ def main():
         conn.commit()
 
     extractor = PaperExtractor(config=config, llm=llm, normalizer=normalizer)
+    verifier = InteractionVerifier(config=config, llm=llm)
+    planner = QueryPlanner()
 
     # Conflict components (Arm 2)
     conflict_detector = None
@@ -461,6 +600,8 @@ def main():
                 extractor=extractor,
                 conflict_detector=conflict_detector,
                 conflict_resolver=conflict_resolver,
+                verifier=verifier,
+                planner=planner,
             )
             logger.info(f"Cycle {cycle} complete | Score: {stats['score']:.2f}")
         except Exception as e:

@@ -64,12 +64,12 @@ class ConflictDetector:
         ev_b = repos.evidence.get_for_interaction(int_b["id"])
 
         # Collect context attributes from evidence
-        orgs_a = {e.get("organism") for e in ev_a if e.get("organism")}
-        orgs_b = {e.get("organism") for e in ev_b if e.get("organism")}
-        tissues_a = {e.get("tissue_cell_type") for e in ev_a if e.get("tissue_cell_type")}
-        tissues_b = {e.get("tissue_cell_type") for e in ev_b if e.get("tissue_cell_type")}
-        conditions_a = {e.get("condition") for e in ev_a if e.get("condition")}
-        conditions_b = {e.get("condition") for e in ev_b if e.get("condition")}
+        orgs_a = {e.get("normalized_organism") or e.get("organism") for e in ev_a if (e.get("normalized_organism") or e.get("organism"))}
+        orgs_b = {e.get("normalized_organism") or e.get("organism") for e in ev_b if (e.get("normalized_organism") or e.get("organism"))}
+        tissues_a = {e.get("normalized_tissue_cell_type") or e.get("tissue_cell_type") for e in ev_a if (e.get("normalized_tissue_cell_type") or e.get("tissue_cell_type"))}
+        tissues_b = {e.get("normalized_tissue_cell_type") or e.get("tissue_cell_type") for e in ev_b if (e.get("normalized_tissue_cell_type") or e.get("tissue_cell_type"))}
+        conditions_a = {e.get("normalized_condition") or e.get("condition") for e in ev_a if (e.get("normalized_condition") or e.get("condition"))}
+        conditions_b = {e.get("normalized_condition") or e.get("condition") for e in ev_b if (e.get("normalized_condition") or e.get("condition"))}
 
         context_diff: dict = {}
         conflict_axis = "effect"

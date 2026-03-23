@@ -27,6 +27,7 @@ class EvidenceType(StrEnum):
     CO_EXPRESSION = "co_expression"
     GENETIC_SCREEN = "genetic_screen"
     CLINICAL = "clinical"
+    CURATED_DB = "curated_db"
     UNKNOWN = "unknown"
 
 
@@ -39,6 +40,37 @@ class InteractionContext(BaseModel):
     concentration: Optional[str] = None
     assay_type: Optional[str] = None
     evidence_subtype: Optional[str] = None  # western_blot, co_ip, cryo_em, etc.
+    normalized_organism: Optional[str] = None
+    normalized_tissue_cell_type: Optional[str] = None
+    normalized_condition: Optional[str] = None
+    normalized_assay_type: Optional[str] = None
+
+
+class LiteralClaimRecord(BaseModel):
+    """
+    Snippet-grounded extracted claim before interpretation/normalization.
+    This preserves provenance so the pipeline can be reprocessed later.
+    """
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    paper_id: str
+    entity_a_text: str
+    entity_b_text: str
+    interaction_type_text: str
+    direction_text: Optional[str] = None
+    effect_text: Optional[str] = None
+    evidence_type_text: Optional[str] = None
+    organism_text: Optional[str] = None
+    tissue_cell_type_text: Optional[str] = None
+    condition_text: Optional[str] = None
+    assay_type_text: Optional[str] = None
+    evidence_subtype_text: Optional[str] = None
+    confidence_text: Optional[str] = None
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    snippet: str
+    reasoning: str = ""
+    verification_status: Optional[str] = None
+    verification_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    verification_notes: Optional[str] = None
 
 
 class EvidenceRecord(BaseModel):
@@ -47,6 +79,7 @@ class EvidenceRecord(BaseModel):
     Stored in the `evidence` table; multiple records can reference the same interaction.
     """
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    claim_id: Optional[str] = None
     interaction_id: str                   # set after interaction upsert
     paper_id: str
     evidence_type: EvidenceType
@@ -56,6 +89,11 @@ class EvidenceRecord(BaseModel):
     snippet: str
     snippet_start: Optional[int] = None
     snippet_end: Optional[int] = None
+    verification_status: Optional[str] = None      # verified | needs_review
+    verification_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    verification_notes: Optional[str] = None
+    adjudication_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    adjudication_notes: Optional[str] = None
 
 
 class Interaction(BaseModel):
@@ -95,3 +133,10 @@ class ExtractedInteractionRaw(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
     snippet: str = ""
     reasoning: str = ""                   # LLM chain-of-thought (not stored in DB)
+    verification_status: Optional[str] = None
+    verification_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    verification_notes: str = ""
+    normalized_organism: Optional[str] = None
+    normalized_tissue_cell_type: Optional[str] = None
+    normalized_condition: Optional[str] = None
+    normalized_assay_type: Optional[str] = None

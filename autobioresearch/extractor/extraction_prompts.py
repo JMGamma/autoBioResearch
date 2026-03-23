@@ -190,3 +190,69 @@ EXTRACTION_FUNCTION = {
         "parameters": EXTRACTION_TOOL["input_schema"],
     }
 }
+
+
+VERIFICATION_SYSTEM_PROMPT = """\
+You are validating a previously extracted biological interaction claim against the paper text.
+
+Check only whether the claimed fields are supported by the supplied evidence snippet and paper text.
+Be conservative. If support is unclear, mark the field unsupported and set overall_status to "needs_review".
+
+Focus on these fields:
+- effect
+- direction
+- organism
+- tissue_cell_type
+- condition
+
+Rules:
+1. Treat the snippet as the strongest evidence.
+2. Use the paper title/abstract only for context, not to hallucinate support.
+3. If a field is absent from the claim, mark it supported.
+4. If support is indirect or ambiguous, mark unsupported.
+5. Return concise notes.
+"""
+
+VERIFICATION_TOOL = {
+    "name": "verify_interaction_claim",
+    "description": "Validate whether an extracted interaction claim is supported by the paper text",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "overall_status": {
+                "type": "string",
+                "enum": ["verified", "needs_review"],
+            },
+            "verification_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+            },
+            "supported_fields": {
+                "type": "object",
+                "properties": {
+                    "effect": {"type": "boolean"},
+                    "direction": {"type": "boolean"},
+                    "organism": {"type": "boolean"},
+                    "tissue_cell_type": {"type": "boolean"},
+                    "condition": {"type": "boolean"},
+                },
+                "required": ["effect", "direction", "organism", "tissue_cell_type", "condition"],
+            },
+            "notes": {
+                "type": "string",
+                "description": "Short explanation of unsupported or uncertain fields",
+            },
+        },
+        "required": ["overall_status", "verification_score", "supported_fields", "notes"],
+    },
+}
+
+VERIFICATION_FUNCTION = {
+    "type": "function",
+    "function": {
+        "name": VERIFICATION_TOOL["name"],
+        "description": VERIFICATION_TOOL["description"],
+        "parameters": VERIFICATION_TOOL["input_schema"],
+    }
+}

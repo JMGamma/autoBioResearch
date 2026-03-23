@@ -50,6 +50,9 @@ class AppConfig(BaseSettings):
     min_snippet_length: int = 20
     max_snippet_length: int = 400
     snippet_fuzzy_threshold: float = 0.75
+    verification_enabled: bool = True
+    claims_to_verify_per_cycle: int = 25
+    verification_min_confidence_score: float = 0.55
 
     # --- Conflict detection ---
     max_candidate_pairs_per_cycle: int = 500
@@ -70,6 +73,8 @@ class AppConfig(BaseSettings):
     max_cycles: int = 0                      # 0 = run forever
     queries_per_cycle: int = 10
     papers_per_cycle: int = 50
+    targeted_queries_per_cycle: int = 10
+    under_supported_seed_evidence_max: int = 1
 
     # --- Logging ---
     log_level: str = "INFO"

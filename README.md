@@ -71,11 +71,18 @@ AutoBioResearch/
 │   │   ├── resolver.py            # LLM conflict classification + query generation
 │   │   └── conflict_prompts.py    # System prompts + tool schemas
 │   │
-│   └── storage/
-│       └── repositories.py        # Typed DB read/write for all tables
+│   ├── storage/
+│   │   └── repositories.py        # Typed DB read/write for all tables
+│   │
+│   └── seeders/
+│       ├── entity_seeder.py       # Resolve/create entities from UniProt accessions
+│       ├── uniprot_fetcher.py     # UniProt/IntAct binary interaction fetcher
+│       ├── reactome_fetcher.py    # Reactome PSIMITAB TSV streamer
+│       └── signor_fetcher.py      # SIGNOR causal signaling network fetcher
 │
 └── scripts/
     ├── init_db.py                 # One-time DB initialization
+    ├── seed_interactions.py       # Bootstrap from UniProt/IntAct + Reactome
     ├── reset_db.py                # Wipe data for testing (soft or hard)
     ├── inspect_conflicts.py       # CLI conflict queue viewer
     └── export_graph.py            # Export to JSON or GraphML
@@ -164,6 +171,50 @@ reasoning_log_backup_count: 3
 uv run scripts/init_db.py
 ```
 
+### Bootstrap from curated databases (optional)
+
+Pre-populate the knowledge graph with high-quality, manually curated interactions from **UniProt/IntAct** and **Reactome** before (or alongside) the LLM research loop. This seeds the graph with a reliable foundation and gives the loop prior context to build on.
+
+```bash
+# Seed from all sources (recommended before first run)
+uv run scripts/seed_interactions.py
+
+# Individual sources
+uv run scripts/seed_interactions.py --source uniprot
+uv run scripts/seed_interactions.py --source reactome
+uv run scripts/seed_interactions.py --source signor
+
+# Test with a small sample before committing (dry-run skips all DB writes)
+uv run scripts/seed_interactions.py --source uniprot --uniprot-limit 500 --dry-run --verbose
+```
+
+**What gets imported:**
+
+| Source | Data | Interaction type | Coverage |
+|---|---|---|---|
+| UniProt / IntAct | Experimentally determined binary protein-protein interactions, Swiss-Prot reviewed, human | `direct_binding` | ~100K pairs |
+| Reactome | Manually curated pathway reactions (binding, phosphorylation, ubiquitination, etc.), human | `direct_binding`, `post_translational`, `enzymatic`, `metabolic`, `transcriptional`, `proximal_association` | ~500K records |
+| SIGNOR | Causal signaling interactions with explicit direction and mechanism, human | `post_translational`, `transcriptional`, `direct_binding`, `signaling`, `transport`, `enzymatic` | ~25K records |
+
+**How it integrates with the loop:**
+
+- Seeded interactions use the `curated_db` evidence type (weighted at 0.9, between `genetic_screen` and `in_vitro`)
+- Seeded entities are registered with all known synonyms, so the LLM extractor can match and merge against them as it processes papers
+- The script is fully idempotent — safe to re-run, will not create duplicate records
+
+**Options:**
+
+```
+--db-path PATH          SQLite file to seed (default: ./autobioresearch.db)
+--source {all,uniprot,reactome}
+--uniprot-limit N       Max UniProt interactions (0 = unlimited)
+--reactome-limit N      Max Reactome interactions (0 = unlimited)
+--signor-limit N        Max SIGNOR interactions (0 = unlimited)
+--rate-limit FLOAT      UniProt API req/s for entity resolution (default: 2.0)
+--dry-run               Resolve entities but skip DB writes
+--verbose               DEBUG-level logging
+```
+
 ---
 
 ## Usage
@@ -237,7 +288,7 @@ Each **evidence** record captures:
 
 | Field | Description |
 |---|---|
-| `evidence_type` | `in_vitro`, `in_vivo`, `structural`, `computational`, `co_expression`, `genetic_screen`, `clinical` |
+| `evidence_type` | `in_vitro`, `in_vivo`, `structural`, `computational`, `co_expression`, `genetic_screen`, `clinical`, `curated_db` |
 | `evidence_subtype` | `western_blot`, `co_ip`, `cryo_em`, `rnaseq`, `chip_seq`, `mass_spec`, etc. |
 | `organism` | e.g. `Homo sapiens`, `Mus musculus` |
 | `tissue_cell_type` | e.g. `HEK293`, `liver`, `CD4+ T cells` |

@@ -26,8 +26,8 @@ def compute_score(repos: Repositories, config: AppConfig) -> tuple[float, dict]:
     n_entities = repos.entities.count()
     n_interactions = repos.interactions.count()
     n_evidence = repos.evidence.count()
-    n_open_conflicts = repos.conflicts.count_open()
-    weighted_sum = repos.conflicts.weighted_sum_open()
+    n_open_conflicts = repos.conflicts.count_unresolved()
+    weighted_sum = repos.conflicts.weighted_sum_unresolved()
 
     score = (n_entities * n_interactions) / (1.0 + config.penalty * weighted_sum)
 

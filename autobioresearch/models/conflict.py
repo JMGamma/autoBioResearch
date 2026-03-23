@@ -12,6 +12,7 @@ class ConflictType(StrEnum):
 
 class ConflictStatus(StrEnum):
     OPEN = "open"
+    REOPENED = "reopened"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"                   # determined not a real conflict
     INVESTIGATING = "investigating"           # resolution queries generated, awaiting data
