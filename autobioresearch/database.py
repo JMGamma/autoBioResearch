@@ -29,6 +29,7 @@ papers = Table(
     Column("extraction_error", Text),
     Column("raw_llm_response", Text),                # stored for debugging/reprocessing
     Column("query_ids", Text),                       # JSON array of query UUIDs
+    Column("priority", Integer, nullable=False, default=0),  # 1=conflict-resolution, 0=general
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
 )
@@ -317,6 +318,8 @@ def apply_migrations(engine) -> None:
     _ensure_column(engine, "evidence", "normalized_assay_type", "normalized_assay_type TEXT")
     _ensure_column(engine, "evidence", "adjudication_score", "adjudication_score FLOAT")
     _ensure_column(engine, "evidence", "adjudication_notes", "adjudication_notes TEXT")
+
+    _ensure_column(engine, "papers", "priority", "priority INTEGER NOT NULL DEFAULT 0")
 
 
 def init_engine(db_path: str):

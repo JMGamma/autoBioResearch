@@ -21,7 +21,7 @@ class ConflictStatus(StrEnum):
 PENALTY_WEIGHTS: dict[ConflictType, float] = {
     ConflictType.TRUE_CONFLICT: 1.0,
     ConflictType.AMBIGUOUS: 0.5,
-    ConflictType.CONTEXT_DEPENDENT: 0.2,
+    ConflictType.CONTEXT_DEPENDENT: 0.0,
 }
 
 

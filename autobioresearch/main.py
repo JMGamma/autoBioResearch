@@ -211,8 +211,10 @@ def run_fetch_phase(
         if not fetch_success_by_query.get(q["id"], False):
             repos.queries.mark_failed(q["id"], error="fetch_failed")
             continue
+        is_conflict_query = q.get("query_type") == QueryType.CONFLICT_RESOLUTION.value
         for p in papers:
             p.query_ids = [q["id"]]
+            p.priority = 1 if is_conflict_query else 0
 
         new_count = repos.papers.upsert_many(papers)
         total_new += new_count

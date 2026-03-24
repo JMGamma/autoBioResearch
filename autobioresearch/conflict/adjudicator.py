@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from autobioresearch.models.conflict import PENALTY_WEIGHTS, ConflictType
+
 
 class EvidenceAdjudicator:
     _TYPE_QUALITY = {
@@ -101,7 +103,7 @@ class EvidenceAdjudicator:
             return {
                 "status": "resolved",
                 "conflict_type": "context_dependent",
-                "penalty_weight": 0.2,
+                "penalty_weight": PENALTY_WEIGHTS[ConflictType.CONTEXT_DEPENDENT],
                 "resolution_paper_id": None,
                 "note": (
                     "Adjudication indicates both claims are supported but in distinct normalized "
@@ -114,7 +116,7 @@ class EvidenceAdjudicator:
             return {
                 "status": "resolved",
                 "conflict_type": "true_conflict",
-                "penalty_weight": 1.0,
+                "penalty_weight": PENALTY_WEIGHTS[ConflictType.TRUE_CONFLICT],
                 "resolution_paper_id": favored["best_paper_id"],
                 "note": (
                     "Adjudication found a strong evidence-quality gap under comparable contexts, "
@@ -126,7 +128,7 @@ class EvidenceAdjudicator:
             return {
                 "status": "resolved",
                 "conflict_type": "context_dependent",
-                "penalty_weight": 0.2,
+                "penalty_weight": PENALTY_WEIGHTS[ConflictType.CONTEXT_DEPENDENT],
                 "resolution_paper_id": None,
                 "note": "Normalized context differences support resolving this conflict as context-dependent.",
             }

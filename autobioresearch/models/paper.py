@@ -35,6 +35,7 @@ class Paper(BaseModel):
     extraction_status: ExtractionStatus = ExtractionStatus.PENDING
     extraction_error: Optional[str] = None
     query_ids: list[str] = Field(default_factory=list)
+    priority: int = 0
 
 
 class ExtractionResult(BaseModel):

@@ -45,18 +45,18 @@ class PaperRepo:
             select(db.papers.c.id).where(db.papers.c.id == paper.id)
         ).fetchone()
         if existing:
-            # Update query_ids to include any new query references
-            if paper.query_ids:
-                row = self.conn.execute(
-                    select(db.papers.c.query_ids).where(db.papers.c.id == paper.id)
-                ).fetchone()
-                existing_ids = json.loads(row.query_ids or "[]")
-                merged = list(set(existing_ids + paper.query_ids))
-                self.conn.execute(
-                    update(db.papers)
-                    .where(db.papers.c.id == paper.id)
-                    .values(query_ids=json.dumps(merged), updated_at=_now())
-                )
+            # Update query_ids and promote priority if this paper is from a higher-priority query
+            row = self.conn.execute(
+                select(db.papers.c.query_ids, db.papers.c.priority).where(db.papers.c.id == paper.id)
+            ).fetchone()
+            existing_ids = json.loads(row.query_ids or "[]")
+            merged = list(set(existing_ids + paper.query_ids)) if paper.query_ids else existing_ids
+            new_priority = max(int(row.priority or 0), paper.priority)
+            self.conn.execute(
+                update(db.papers)
+                .where(db.papers.c.id == paper.id)
+                .values(query_ids=json.dumps(merged), priority=new_priority, updated_at=_now())
+            )
             return False
 
         self.conn.execute(db.papers.insert().values(
@@ -72,6 +72,7 @@ class PaperRepo:
             fetch_status=paper.fetch_status.value,
             extraction_status=paper.extraction_status.value,
             query_ids=json.dumps(paper.query_ids),
+            priority=paper.priority,
             created_at=_now(),
             updated_at=_now(),
         ))
@@ -86,6 +87,7 @@ class PaperRepo:
             select(db.papers)
             .where(db.papers.c.extraction_status == "pending")
             .where(db.papers.c.fetch_status.in_(["abstract_only", "full_text_available"]))
+            .order_by(db.papers.c.priority.desc(), db.papers.c.created_at)
             .limit(limit)
         ).mappings().all()
         return [dict(r) for r in rows]
