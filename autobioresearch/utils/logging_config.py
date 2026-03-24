@@ -6,6 +6,30 @@ from pathlib import Path
 from typing import Optional
 
 
+def setup_truncation_review_logging(log_file: str) -> None:
+    """Configure the dedicated truncation-review log (propagate=False, isolated from main log)."""
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rl = logging.getLogger("autobioresearch.truncation_review")
+    rl.setLevel(logging.WARNING)
+    rl.propagate = False  # keep out of the main log stream
+
+    if not rl.handlers:
+        fmt = logging.Formatter(
+            "%(asctime)s REVIEW   %(name)s:",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+        fh = logging.handlers.RotatingFileHandler(
+            log_path,
+            maxBytes=5 * 1024 * 1024,  # 5 MB
+            backupCount=10,
+            encoding="utf-8",
+        )
+        fh.setFormatter(fmt)
+        rl.addHandler(fh)
+
+
 def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
     fmt = logging.Formatter(

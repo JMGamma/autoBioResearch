@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from autobioresearch.config import AppConfig
-from autobioresearch.extractor.claude_client import LLMClient
+from autobioresearch.extractor.claude_client import LLMClient, LLMTruncatedError
 from autobioresearch.extractor.evidence_normalizer import EvidenceNormalizer
 from autobioresearch.extractor.extraction_prompts import (
     EXTRACTION_FUNCTION,
@@ -37,6 +37,36 @@ from autobioresearch.utils.text_utils import (
 )
 
 logger = logging.getLogger(__name__)
+_truncation_review_logger = logging.getLogger("autobioresearch.truncation_review")
+
+
+def _log_truncation_review(
+    paper_id: str,
+    title: str,
+    chunk_start: int,
+    chunk_end: int,
+    max_tokens: int,
+    attempts: int,
+) -> None:
+    """Write a structured entry to the truncation review log for human triage."""
+    pmid_num = paper_id.removeprefix("pmid:")
+    pubmed_url = (
+        f"https://pubmed.ncbi.nlm.nih.gov/{pmid_num}/"
+        if pmid_num.isdigit()
+        else "n/a"
+    )
+    title_short = (title or "")[:120] + ("…" if len(title or "") > 120 else "")
+    _truncation_review_logger.warning(
+        "\n"
+        f"  paper_id    : {paper_id}\n"
+        f"  pubmed_url  : {pubmed_url}\n"
+        f"  title       : {title_short}\n"
+        f"  chunk       : {chunk_start}–{chunk_end} chars\n"
+        f"  max_tokens  : {max_tokens}\n"
+        f"  attempts    : {attempts}\n"
+        f"  action      : flagged for human review — verify paper is extractable or raise llm_max_tokens"
+    )
+
 
 # Known non-mammalian organisms — interactions with these as sole organism are skipped.
 # Lowercase; matched as substring so "arabidopsis thaliana" catches "arabidopsis".
@@ -109,12 +139,32 @@ class PaperExtractor:
 
             if n_chunks > 1:
                 logger.debug(f"Calling LLM for {paper_id} chunk {chunk_idx+1}/{n_chunks} @{chunk_start}")
-            raw = self._llm.call_with_tool(
-                system=EXTRACTION_SYSTEM_PROMPT,
-                user=user_prompt,
-                tool=EXTRACTION_TOOL,
-                tool_function=EXTRACTION_FUNCTION,
-            )
+            raw = None
+            max_attempts = self._config.llm_truncation_retries + 1
+            for attempt in range(max_attempts):
+                try:
+                    raw = self._llm.call_with_tool(
+                        system=EXTRACTION_SYSTEM_PROMPT,
+                        user=user_prompt,
+                        tool=EXTRACTION_TOOL,
+                        tool_function=EXTRACTION_FUNCTION,
+                    )
+                    break
+                except LLMTruncatedError:
+                    if attempt < max_attempts - 1:
+                        logger.warning(
+                            f"Truncation on attempt {attempt + 1}/{max_attempts} for "
+                            f"{paper_id} chunk @{chunk_start} — retrying"
+                        )
+                    else:
+                        logger.warning(
+                            f"Truncation on all {max_attempts} attempt(s) for "
+                            f"{paper_id} chunk @{chunk_start} — flagged for review"
+                        )
+                        _log_truncation_review(
+                            paper_id, title, chunk_start, chunk_end,
+                            self._config.llm_max_tokens, max_attempts,
+                        )
 
             if not raw:
                 logger.warning(f"No LLM output for paper {paper_id}, chunk starting at {chunk_start}")

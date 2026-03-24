@@ -14,7 +14,8 @@ llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 
 # --- LLM tuning ---
 llm_temperature: 0.1
-llm_max_tokens: 8192          # output token cap — extraction JSON is ~3-6k tokens even for large papers
+llm_max_tokens: 10000         # output token cap — raised from 8192; dense full-text papers can hit 8-10k
+llm_truncation_retries: 1     # retry once if finish_reason=length; double-truncations go to truncation_review.log
 llm_requests_per_minute: 40
 llm_max_retries: 3
 llm_retry_backoff_seconds: 5
@@ -25,7 +26,7 @@ db_path: "./autobioresearch.db"
 
 # --- Paper fetching ---
 crawler_threads: 4
-papers_per_query: 50
+papers_per_query: 10
 max_full_text_per_cycle: 20
 pubmed_requests_per_second: 3
 semantic_scholar_requests_per_second: 1
@@ -53,7 +54,7 @@ entity_resolution_requests_per_second: 3.0
 entity_resolution_timeout: 10
 
 # --- Perturbation ---
-# Exponent α in multi-path score combination: 1 - ∏(1 - |xᵢ|^α)
+# Exponent alpha in multi-path score combination: 1 - prod(1 - |x_i|^alpha)
 # Lower α → paths combine more aggressively. Range (0, 1]. Default 0.55.
 perturbation_combination_exponent: 0.55
 
@@ -74,6 +75,7 @@ conflicts_to_analyze_per_cycle: 20
 # --- Logging ---
 log_level: "INFO"
 log_file: "./logs/autobioresearch.log"
+truncation_review_log_file: "./logs/truncation_review.log"
 
 # --- Reasoning / thinking capture (openai_compatible only) ---
 # Set to true to capture <think>…</think> blocks and/or reasoning_content fields

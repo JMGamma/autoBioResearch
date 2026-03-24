@@ -28,6 +28,7 @@ class AppConfig(BaseSettings):
     # --- LLM tuning ---
     llm_temperature: float = 0.1
     llm_max_tokens: int = 8192   # output cap; extraction JSON is ~3-6k tokens even for large papers
+    llm_truncation_retries: int = 1   # retries on finish_reason=length before flagging for human review
     llm_requests_per_minute: int = 40
     llm_max_retries: int = 3
     llm_retry_backoff_seconds: float = 5.0
@@ -82,6 +83,7 @@ class AppConfig(BaseSettings):
     # --- Logging ---
     log_level: str = "INFO"
     log_file: str = "./logs/autobioresearch.log"
+    truncation_review_log_file: str = "./logs/truncation_review.log"
 
     # --- Reasoning / thinking capture (openai_compatible only) ---
     # Captures <think>…</think> blocks (Qwen3, DeepSeek-R1, QwQ, etc.) and/or
@@ -112,7 +114,7 @@ class AppConfig(BaseSettings):
         yaml_path = Path(path)
         data: dict = {}
         if yaml_path.exists():
-            with open(yaml_path) as f:
+            with open(yaml_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         # env vars and .env take precedence over yaml (handled by pydantic-settings)
         return cls(**data)

@@ -24,6 +24,12 @@ from autobioresearch.utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
+
+class LLMTruncatedError(Exception):
+    """Raised when an LLM response is cut off due to max_tokens (finish_reason=length)
+    and all JSON recovery strategies have failed. Callers may retry with the same input."""
+
+
 # Module-level reasoning logger — configured lazily on first LLMClient instantiation.
 _reasoning_logger: Optional[logging.Logger] = None
 
@@ -266,7 +272,13 @@ class LLMClient:
                 if repaired is not None:
                     logger.info(f"Recovered partial JSON from truncated tool call for '{tool_name}'")
                     return repaired
-                return self._extract_json_fallback(clean_content)
+                result = self._extract_json_fallback(clean_content)
+                if result is None and finish_reason == "length":
+                    raise LLMTruncatedError(
+                        f"LLM response truncated for tool '{tool_name}' "
+                        f"(max_tokens={self._config.llm_max_tokens})"
+                    )
+                return result
 
         # No tool_calls — model used content field instead of the tool_calls mechanism.
 
@@ -287,7 +299,13 @@ class LLMClient:
             f"Content after <think> strip (first 300 chars): "
             f"{clean_content[:300] if clean_content else '(empty)'}"
         )
-        return self._extract_json_fallback(clean_content)
+        result = self._extract_json_fallback(clean_content)
+        if result is None and finish_reason == "length":
+            raise LLMTruncatedError(
+                f"LLM response truncated for tool '{tool_name}' "
+                f"(max_tokens={self._config.llm_max_tokens})"
+            )
+        return result
 
     def _repair_truncated_json(self, raw: str) -> Optional[dict]:
         """

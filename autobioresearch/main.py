@@ -35,7 +35,7 @@ from autobioresearch.perturbation.sign_map import unmapped_effect_summary
 from autobioresearch.models import ExtractedInteractionRaw, QueryType, SearchQuery
 from autobioresearch.planner import QueryPlanner
 from autobioresearch.storage.repositories import Repositories
-from autobioresearch.utils.logging_config import setup_logging
+from autobioresearch.utils.logging_config import setup_logging, setup_truncation_review_logging
 
 logger = logging.getLogger(__name__)
 
@@ -615,6 +615,7 @@ def main():
         config.max_cycles = args.cycles
 
     setup_logging(config.log_level, config.log_file)
+    setup_truncation_review_logging(config.truncation_review_log_file)
     atexit.register(_log_process_exit)
     signal.signal(signal.SIGINT, _handle_sigint)
     if hasattr(signal, "SIGTERM"):
