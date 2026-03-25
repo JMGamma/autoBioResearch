@@ -257,6 +257,16 @@ uv run scripts/inspect_conflicts.py
 uv run scripts/inspect_conflicts.py --status open --type true_conflict --show-evidence
 ```
 
+### Audit synonym overlaps
+
+```bash
+# Summary of synonyms that currently map to multiple entities
+uv run scripts/validate_synonym_overlaps.py
+
+# Show the specific entity rows behind each overlap
+uv run scripts/validate_synonym_overlaps.py --show-rows --limit 20
+```
+
 ### Export the knowledge graph
 
 ```bash
@@ -303,7 +313,7 @@ Each **evidence** record captures:
 |---|---|---|
 | `true_conflict` | 1.0 | Same organism, same conditions, opposite claims — a real scientific controversy |
 | `ambiguous` | 0.5 | Insufficient context to classify; more data needed |
-| `context_dependent` | 0.2 | Different organisms/conditions explain the divergence — expected in biology |
+| `context_dependent` | 0.0 | Different organisms/conditions explain the divergence — expected in biology |
 
 Open true conflicts generate targeted resolution queries, which feed back into Arm 1's search queue.
 

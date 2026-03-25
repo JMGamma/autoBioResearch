@@ -27,7 +27,6 @@ papers = Table(
     Column("extraction_status", Text, nullable=False, default="pending"),
     # pending | processing | done | failed
     Column("extraction_error", Text),
-    Column("raw_llm_response", Text),                # stored for debugging/reprocessing
     Column("query_ids", Text),                       # JSON array of query UUIDs
     Column("priority", Integer, nullable=False, default=0),  # 1=conflict-resolution, 0=general
     Column("created_at", Text, nullable=False),
@@ -156,7 +155,7 @@ conflicts = Table(
     Column("llm_analysis", Text),
     Column("generated_query_ids", Text),             # JSON array
     Column("penalty_weight", Float, default=1.0),
-    # true_conflict=1.0, ambiguous=0.5, context_dependent=0.2
+    # true_conflict=1.0, ambiguous=0.5, context_dependent=0.0
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
 )
@@ -239,7 +238,10 @@ def create_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_canonical_organism ON entities(canonical_name, organism)",
         # entity_synonyms
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_synonyms_synonym ON entity_synonyms(synonym)",
+        "DROP INDEX IF EXISTS idx_entity_synonyms_synonym",
+        "DROP INDEX IF EXISTS uq_entity_synonym",
+        "CREATE INDEX IF NOT EXISTS idx_entity_synonyms_synonym_lookup ON entity_synonyms(synonym)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_synonyms_entity_synonym ON entity_synonyms(entity_id, synonym)",
         # interactions
         "CREATE INDEX IF NOT EXISTS idx_interactions_ab ON interactions(entity_a_id, entity_b_id)",
         "CREATE INDEX IF NOT EXISTS idx_interactions_ba ON interactions(entity_b_id, entity_a_id)",
@@ -281,6 +283,55 @@ def _ensure_column(engine, table_name: str, column_name: str, ddl: str) -> None:
         conn.commit()
 
 
+def _drop_legacy_raw_llm_response_column(engine) -> None:
+    """Rebuild papers without the legacy raw_llm_response column if it still exists."""
+    inspector = inspect(engine)
+    columns = [col["name"] for col in inspector.get_columns("papers")]
+    if "raw_llm_response" not in columns:
+        return
+
+    create_sql = """
+        CREATE TABLE papers__new (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            title TEXT,
+            abstract TEXT,
+            authors TEXT,
+            journal TEXT,
+            year INTEGER,
+            doi TEXT,
+            pmc_id TEXT,
+            fetch_status TEXT NOT NULL DEFAULT 'pending',
+            extraction_status TEXT NOT NULL DEFAULT 'pending',
+            extraction_error TEXT,
+            query_ids TEXT,
+            priority INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """
+    copy_sql = """
+        INSERT INTO papers__new (
+            id, source, title, abstract, authors, journal, year, doi, pmc_id,
+            fetch_status, extraction_status, extraction_error, query_ids, priority,
+            created_at, updated_at
+        )
+        SELECT
+            id, source, title, abstract, authors, journal, year, doi, pmc_id,
+            fetch_status, extraction_status, extraction_error, query_ids,
+            COALESCE(priority, 0), created_at, updated_at
+        FROM papers
+    """
+
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text(create_sql))
+        conn.execute(text(copy_sql))
+        conn.execute(text("DROP TABLE papers"))
+        conn.execute(text("ALTER TABLE papers__new RENAME TO papers"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
 def apply_migrations(engine) -> None:
     """Best-effort additive migrations for existing SQLite databases."""
     _ensure_column(engine, "search_queries", "last_error", "last_error TEXT")
@@ -320,6 +371,7 @@ def apply_migrations(engine) -> None:
     _ensure_column(engine, "evidence", "adjudication_notes", "adjudication_notes TEXT")
 
     _ensure_column(engine, "papers", "priority", "priority INTEGER NOT NULL DEFAULT 0")
+    _drop_legacy_raw_llm_response_column(engine)
 
 
 def init_engine(db_path: str):

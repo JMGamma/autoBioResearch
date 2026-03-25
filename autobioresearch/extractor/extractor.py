@@ -32,7 +32,6 @@ from autobioresearch.models import (
 from autobioresearch.storage.repositories import Repositories
 from autobioresearch.utils.text_utils import (
     chunk_text,
-    find_snippet_offsets,
     fuzzy_snippet_check,
 )
 
@@ -178,7 +177,8 @@ class PaperExtractor:
             if notes:
                 all_notes.append(notes)
 
-        # Deduplicate interactions by (entity_a, entity_b, type, effect, snippet_prefix)
+        # Deduplicate only exact repeated claims across chunks; preserve direction
+        # and snippet-distinct findings from the same paper.
         all_interactions = self._deduplicate_interactions(all_interactions)
         all_interactions = [
             self._evidence_normalizer.normalize(
@@ -204,23 +204,28 @@ class PaperExtractor:
         new_interactions = 0
         new_evidence = 0
 
-        # Normalize all entities first, collect name->id mapping
+        # Normalize all entities first, collect name->id mapping.
+        # Paper-count telemetry is tracked per resolved entity_id, not per raw mention.
         name_to_id: dict[str, str] = {}
-        seen_entity_names: set[str] = set()
+        counted_entity_ids: set[str] = set()
+        created_entity_ids: set[str] = set()
+
+        def resolve_entity(raw_entity: ExtractedEntityRaw) -> str:
+            nonlocal new_entities
+            entity_id, created_new = self._normalizer.normalize_with_metadata(raw_entity)
+            name_to_id.setdefault(raw_entity.name, entity_id)
+            if created_new and entity_id not in created_entity_ids:
+                created_entity_ids.add(entity_id)
+                new_entities += 1
+            if entity_id not in counted_entity_ids:
+                repos.entities.increment_paper_count(entity_id)
+                counted_entity_ids.add(entity_id)
+            return entity_id
 
         for ent in result.entities:
-            if ent.name in seen_entity_names:
+            if ent.name in name_to_id:
                 continue
-            seen_entity_names.add(ent.name)
-
-            before_count = repos.entities.count()
-            entity_id = self._normalizer.normalize(ent)
-            after_count = repos.entities.count()
-            if after_count > before_count:
-                new_entities += 1
-
-            name_to_id[ent.name] = entity_id
-            repos.entities.increment_paper_count(entity_id)
+            resolve_entity(ent)
 
         # Persist interactions + evidence
         for raw_int in result.interactions:
@@ -230,17 +235,15 @@ class PaperExtractor:
             # If entity wasn't in the entities list, normalize on the fly
             if not entity_a_id:
                 from autobioresearch.models import EntityType
-                entity_a_id = self._normalizer.normalize(ExtractedEntityRaw(
+                entity_a_id = resolve_entity(ExtractedEntityRaw(
                     name=raw_int.entity_a, entity_type=EntityType.UNKNOWN
                 ))
-                name_to_id[raw_int.entity_a] = entity_a_id
 
             if not entity_b_id:
                 from autobioresearch.models import EntityType
-                entity_b_id = self._normalizer.normalize(ExtractedEntityRaw(
+                entity_b_id = resolve_entity(ExtractedEntityRaw(
                     name=raw_int.entity_b, entity_type=EntityType.UNKNOWN
                 ))
-                name_to_id[raw_int.entity_b] = entity_b_id
 
             # Upsert interaction
             interaction = Interaction(
@@ -567,7 +570,7 @@ class PaperExtractor:
     ) -> list[ExtractedInteractionRaw]:
         """
         Remove interactions extracted multiple times across chunks.
-        Key: (entity_a_lower, entity_b_lower, interaction_type, effect).
+        Key: (entity_a_lower, entity_b_lower, interaction_type, effect, direction, snippet).
         Keeps the one with highest confidence_score.
         """
         seen: dict[tuple, ExtractedInteractionRaw] = {}
@@ -577,6 +580,8 @@ class PaperExtractor:
                 intr.entity_b.lower().strip(),
                 intr.interaction_type,
                 (intr.effect or "").lower(),
+                intr.direction,
+                intr.snippet.strip(),
             )
             if key not in seen or intr.confidence_score > seen[key].confidence_score:
                 seen[key] = intr

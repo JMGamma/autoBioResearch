@@ -9,7 +9,7 @@ from .interaction import ExtractedInteractionRaw
 class FetchStatus(StrEnum):
     PENDING = "pending"
     ABSTRACT_ONLY = "abstract_only"
-    FULL_TEXT_AVAILABLE = "full_text_available"  # pmc_id present, fetchable on demand
+    FULL_TEXT_AVAILABLE = "full_text_available"  # legacy status for prefetch-capable DBs
     FAILED = "failed"
 
 

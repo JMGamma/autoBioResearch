@@ -92,24 +92,12 @@ class PaperRepo:
         ).mappings().all()
         return [dict(r) for r in rows]
 
-    def get_full_text_candidates(self, limit: int = 20) -> list[dict]:
-        """Papers that have a pmc_id but haven't had full text fetched yet."""
-        rows = self.conn.execute(
-            select(db.papers)
-            .where(db.papers.c.pmc_id.isnot(None))
-            .where(db.papers.c.fetch_status == "abstract_only")
-            .where(db.papers.c.extraction_status == "pending")
-            .limit(limit)
-        ).mappings().all()
-        return [dict(r) for r in rows]
-
-    def mark_extraction_done(self, paper_id: str, raw_llm_response: Optional[str] = None):
+    def mark_extraction_done(self, paper_id: str):
         self.conn.execute(
             update(db.papers)
             .where(db.papers.c.id == paper_id)
             .values(
                 extraction_status="done",
-                raw_llm_response=raw_llm_response,
                 updated_at=_now(),
             )
         )
@@ -123,13 +111,6 @@ class PaperRepo:
                 extraction_error=error[:2000],
                 updated_at=_now(),
             )
-        )
-
-    def mark_fetch_status(self, paper_id: str, status: str):
-        self.conn.execute(
-            update(db.papers)
-            .where(db.papers.c.id == paper_id)
-            .values(fetch_status=status, updated_at=_now())
         )
 
     def count(self) -> int:
@@ -210,13 +191,56 @@ class EntityRepo:
             except Exception:
                 pass  # unique constraint violation = synonym already known
 
-    def find_by_synonym(self, synonym: str) -> Optional[str]:
-        """Returns entity_id or None."""
-        row = self.conn.execute(
-            select(db.entity_synonyms.c.entity_id)
+    def find_by_synonym_candidates(self, synonym: str) -> list[dict]:
+        rows = self.conn.execute(
+            select(
+                db.entity_synonyms.c.entity_id,
+                db.entities.c.entity_type,
+                db.entities.c.organism,
+                db.entities.c.canonical_name,
+                db.entities.c.paper_count,
+                db.entity_synonyms.c.source,
+            )
+            .join(db.entities, db.entities.c.id == db.entity_synonyms.c.entity_id)
             .where(db.entity_synonyms.c.synonym == synonym.lower().strip())
-        ).fetchone()
-        return row.entity_id if row else None
+            .order_by(db.entities.c.paper_count.desc(), db.entities.c.canonical_name.asc())
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+    def find_by_synonym(
+        self,
+        synonym: str,
+        *,
+        entity_type: Optional[str] = None,
+        organism: Optional[str] = None,
+    ) -> Optional[str]:
+        """Returns entity_id when the synonym lookup is unambiguous after optional narrowing."""
+        candidates = self.find_by_synonym_candidates(synonym)
+        if not candidates:
+            return None
+
+        unique_ids = {row["entity_id"] for row in candidates}
+        if len(unique_ids) == 1:
+            return next(iter(unique_ids))
+
+        narrowed = candidates
+        if entity_type is not None:
+            narrowed = [row for row in narrowed if row.get("entity_type") == entity_type]
+            unique_ids = {row["entity_id"] for row in narrowed}
+            if len(unique_ids) == 1:
+                return next(iter(unique_ids))
+
+        if organism is not None:
+            organism_lower = organism.lower().strip()
+            narrowed = [
+                row for row in narrowed
+                if (row.get("organism") or "").lower().strip() == organism_lower
+            ]
+            unique_ids = {row["entity_id"] for row in narrowed}
+            if len(unique_ids) == 1:
+                return next(iter(unique_ids))
+
+        return None
 
     def find_by_external_id(self, source: str, accession: str) -> Optional[str]:
         """Look up entity_id by external_ids JSON field (e.g. source='uniprot', accession='P04637').
@@ -421,7 +445,8 @@ class InteractionRepo:
         already_checked: Optional[set[frozenset]] = None,
     ) -> list[tuple[dict, dict]]:
         """
-        Return pairs of interactions on the same entity pair + type with different effects.
+        Return pairs of interactions on the same entity pair + type with either
+        different effects or different directed claims.
         Excludes pairs already in the conflicts table.
         """
         stmt = text("""
@@ -432,9 +457,20 @@ class InteractionRepo:
                 OR (a.entity_a_id = b.entity_b_id AND a.entity_b_id = b.entity_a_id)
             )
             WHERE a.interaction_type = b.interaction_type
-              AND a.effect IS NOT NULL
-              AND b.effect IS NOT NULL
-              AND a.effect != b.effect
+              AND (
+                    (
+                        a.effect IS NOT NULL
+                        AND b.effect IS NOT NULL
+                        AND a.effect != b.effect
+                    )
+                    OR (
+                        COALESCE(a.direction, 'undirected') != COALESCE(b.direction, 'undirected')
+                        AND 'undirected' NOT IN (
+                            COALESCE(a.direction, 'undirected'),
+                            COALESCE(b.direction, 'undirected')
+                        )
+                    )
+                  )
               AND a.id < b.id
               -- Require independent sources: A must have a paper B does not have,
               -- and B must have a paper A does not have.

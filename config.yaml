@@ -6,7 +6,7 @@
 # Use "anthropic" for Claude via Anthropic API (requires ANTHROPIC_API_KEY in .env)
 # Use "openai_compatible" for local LLMs (Ollama, LM Studio, vLLM, llama.cpp server, etc.)
 llm_api_type: "openai_compatible"
-llm_model: "qwen/qwen3.5-9b"
+llm_model: "qwen/qwen3.5-27b-claude-4.6-opus-reasoning-distilled"
 # For openai_compatible mode, set the base URL of your local LLM REST server:
 llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 # llm_base_url: "http://localhost:1234/v1"    # LM Studio
@@ -60,7 +60,7 @@ perturbation_combination_exponent: 0.55
 
 # --- Scoring ---
 # score = (N_entities * N_interactions) / (1 + penalty * weighted_conflict_sum)
-# penalty_weight per conflict type: true=1.0, ambiguous=0.5, context_dependent=0.2
+# penalty_weight per conflict type: true=1.0, ambiguous=0.5, context_dependent=0.0
 penalty: 2.0
 
 # --- Loop control ---

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 
 from autobioresearch import database as db
 from autobioresearch.config import AppConfig
 from autobioresearch import main as main_module
-from autobioresearch.main import run_fetch_phase
+from autobioresearch.main import run_extraction_phase, run_fetch_phase
 from autobioresearch.metrics import compute_score
+from autobioresearch.extractor.extractor import PaperExtractor
+from autobioresearch.extractor.normalizer import EntityNormalizer
 from autobioresearch.extractor.verifier import InteractionVerifier
 from autobioresearch.extractor.evidence_normalizer import EvidenceNormalizer
 from autobioresearch.planner import QueryPlanner
@@ -23,7 +25,9 @@ from autobioresearch.models import (
     InteractionType,
     EvidenceRecord,
     EvidenceType,
+    ExtractedEntityRaw,
     Paper,
+    ExtractionResult,
     LiteralClaimRecord,
     QueryType,
     SearchQuery,
@@ -67,6 +71,38 @@ class _RecordingPubMed:
         ]
 
 
+class _RecordingPMC:
+    def __init__(self, text: str):
+        self.text = text
+        self.calls: list[str] = []
+
+    def fetch(self, pmc_id: str):
+        self.calls.append(pmc_id)
+        return self.text
+
+
+class _StubExtractor:
+    def __init__(self, result: ExtractionResult):
+        self.result = result
+        self.extract_calls: list[tuple[str, str]] = []
+        self.persist_calls = 0
+
+        class _NormalizerProxy:
+            @staticmethod
+            def set_repo(_repo):
+                return None
+
+        self._normalizer = _NormalizerProxy()
+
+    def extract(self, paper_id: str, title: str, text: str) -> ExtractionResult:
+        self.extract_calls.append((paper_id, text))
+        return self.result
+
+    def persist(self, result: ExtractionResult, repos: Repositories):
+        self.persist_calls += 1
+        return (0, 0, 0)
+
+
 def _config() -> AppConfig:
     return AppConfig(
         llm_api_type="openai_compatible",
@@ -74,6 +110,7 @@ def _config() -> AppConfig:
         queries_per_cycle=10,
         papers_per_query=7,
         crawler_threads=1,
+        entity_resolution_enabled=False,
     )
 
 
@@ -177,6 +214,43 @@ def test_investigating_conflicts_still_count_toward_score():
         engine.dispose()
 
 
+def test_context_dependent_conflicts_do_not_reduce_score():
+    engine, conn, repos = _repos()
+    try:
+        entity_a = BiologicalEntity(canonical_name="A", display_name="A", entity_type="protein")
+        entity_b = BiologicalEntity(canonical_name="B", display_name="B", entity_type="protein")
+        repos.entities.insert(entity_a)
+        repos.entities.insert(entity_b)
+
+        interaction = Interaction(
+            entity_a_id=entity_a.id,
+            entity_b_id=entity_b.id,
+            interaction_type=InteractionType.SIGNALING,
+            direction="A_to_B",
+            effect="activates",
+        )
+        interaction_id, _ = repos.interactions.upsert(interaction)
+        repos.conflicts.insert(
+            Conflict(
+                interaction_a_id=interaction_id,
+                interaction_b_id=interaction_id,
+                conflict_type=ConflictType.CONTEXT_DEPENDENT,
+                conflict_axis="effect",
+                penalty_weight=0.0,
+            )
+        )
+        conn.commit()
+
+        score, stats = compute_score(repos, _config())
+
+        assert stats["n_unresolved_conflicts"] == 1
+        assert stats["weighted_conflict_sum"] == 0.0
+        assert score == 2.0
+    finally:
+        conn.close()
+        engine.dispose()
+
+
 def test_interaction_upsert_distinguishes_direction():
     engine, conn, repos = _repos()
     try:
@@ -208,6 +282,128 @@ def test_interaction_upsert_distinguishes_direction():
         assert second_new is True
         assert first_id != second_id
         assert repos.interactions.count() == 2
+    finally:
+        conn.close()
+        engine.dispose()
+
+
+def test_conflict_candidate_detection_includes_opposite_direction_claims():
+    engine, conn, repos = _repos()
+    try:
+        entity_a = BiologicalEntity(canonical_name="A", display_name="A", entity_type="protein")
+        entity_b = BiologicalEntity(canonical_name="B", display_name="B", entity_type="protein")
+        repos.entities.insert(entity_a)
+        repos.entities.insert(entity_b)
+
+        forward_id, _ = repos.interactions.upsert(
+            Interaction(
+                entity_a_id=entity_a.id,
+                entity_b_id=entity_b.id,
+                interaction_type=InteractionType.SIGNALING,
+                direction="A_to_B",
+                effect="activates",
+            )
+        )
+        reverse_id, _ = repos.interactions.upsert(
+            Interaction(
+                entity_a_id=entity_a.id,
+                entity_b_id=entity_b.id,
+                interaction_type=InteractionType.SIGNALING,
+                direction="B_to_A",
+                effect="activates",
+            )
+        )
+        repos.evidence.insert(
+            EvidenceRecord(
+                interaction_id=forward_id,
+                paper_id="pmid:1",
+                evidence_type=EvidenceType.IN_VITRO,
+                confidence="high",
+                confidence_score=0.8,
+                context=InteractionContext(organism="Homo sapiens"),
+                snippet="paper one",
+            )
+        )
+        repos.evidence.insert(
+            EvidenceRecord(
+                interaction_id=reverse_id,
+                paper_id="pmid:2",
+                evidence_type=EvidenceType.IN_VITRO,
+                confidence="high",
+                confidence_score=0.8,
+                context=InteractionContext(organism="Homo sapiens"),
+                snippet="paper two",
+            )
+        )
+        conn.commit()
+
+        pairs = repos.interactions.get_pairs_for_conflict_detection()
+        from autobioresearch.conflict.detector import ConflictDetector
+        conflict = ConflictDetector()._classify_rule_based(
+            repos.interactions.get_by_id(forward_id),
+            repos.interactions.get_by_id(reverse_id),
+            repos,
+        )
+
+        assert {frozenset((a["id"], b["id"])) for a, b in pairs} == {frozenset((forward_id, reverse_id))}
+        assert conflict is not None
+        assert conflict.conflict_axis == "direction"
+    finally:
+        conn.close()
+        engine.dispose()
+
+
+def test_conflict_candidate_detection_ignores_undirected_direction_noise():
+    engine, conn, repos = _repos()
+    try:
+        entity_a = BiologicalEntity(canonical_name="A", display_name="A", entity_type="protein")
+        entity_b = BiologicalEntity(canonical_name="B", display_name="B", entity_type="protein")
+        repos.entities.insert(entity_a)
+        repos.entities.insert(entity_b)
+
+        directed_id, _ = repos.interactions.upsert(
+            Interaction(
+                entity_a_id=entity_a.id,
+                entity_b_id=entity_b.id,
+                interaction_type=InteractionType.SIGNALING,
+                direction="A_to_B",
+                effect="activates",
+            )
+        )
+        undirected_id, _ = repos.interactions.upsert(
+            Interaction(
+                entity_a_id=entity_a.id,
+                entity_b_id=entity_b.id,
+                interaction_type=InteractionType.SIGNALING,
+                direction="undirected",
+                effect="activates",
+            )
+        )
+        repos.evidence.insert(
+            EvidenceRecord(
+                interaction_id=directed_id,
+                paper_id="pmid:1",
+                evidence_type=EvidenceType.IN_VITRO,
+                confidence="high",
+                confidence_score=0.8,
+                context=InteractionContext(organism="Homo sapiens"),
+                snippet="paper one",
+            )
+        )
+        repos.evidence.insert(
+            EvidenceRecord(
+                interaction_id=undirected_id,
+                paper_id="pmid:2",
+                evidence_type=EvidenceType.IN_VITRO,
+                confidence="high",
+                confidence_score=0.8,
+                context=InteractionContext(organism="Homo sapiens"),
+                snippet="paper two",
+            )
+        )
+        conn.commit()
+
+        assert repos.interactions.get_pairs_for_conflict_detection() == []
     finally:
         conn.close()
         engine.dispose()
@@ -1059,7 +1255,7 @@ def test_conflict_resolver_refreshes_adjudication_and_uses_it_in_prompt():
             "is_genuine_conflict": False,
             "reasoning": "Different evidence quality and context support context dependence.",
             "suggested_queries": [],
-            "penalty_weight": 0.2,
+            "penalty_weight": 0.0,
         })
         resolver = ConflictResolver(llm=llm)
         changed = resolver.analyze_and_resolve(repos, _config())
@@ -1230,3 +1426,259 @@ def test_conflict_resolver_auto_resolves_strong_same_context_conflict_without_ll
     finally:
         conn.close()
         engine.dispose()
+
+
+def test_paper_extractor_deduplicates_only_exact_repeated_claims():
+    normalizer = EntityNormalizer(
+        entity_repo=None,
+        synonyms_path="nonexistent_test_synonyms.yaml",
+    )
+    extractor = PaperExtractor(config=_config(), llm=None, normalizer=normalizer)
+
+    base = dict(
+        interaction_type=InteractionType.SIGNALING,
+        effect="activates",
+        evidence_type=EvidenceType.IN_VITRO,
+        confidence="high",
+        confidence_score=0.9,
+    )
+
+    forward = ExtractedInteractionRaw(
+        entity_a="A",
+        entity_b="B",
+        direction="A_to_B",
+        snippet="A activates B in hypoxia.",
+        **base,
+    )
+    reverse = ExtractedInteractionRaw(
+        entity_a="A",
+        entity_b="B",
+        direction="B_to_A",
+        snippet="B activates A in hypoxia.",
+        **base,
+    )
+    duplicate = ExtractedInteractionRaw(
+        entity_a="A",
+        entity_b="B",
+        direction="A_to_B",
+        snippet="A activates B in hypoxia.",
+        confidence_score=0.4,
+        **{k: v for k, v in base.items() if k != "confidence_score"},
+    )
+    distinct_snippet = ExtractedInteractionRaw(
+        entity_a="A",
+        entity_b="B",
+        direction="A_to_B",
+        snippet="A activates B after serum starvation.",
+        **base,
+    )
+
+    deduped = extractor._deduplicate_interactions([forward, reverse, duplicate, distinct_snippet])
+
+    assert len(deduped) == 3
+    assert sum(1 for row in deduped if row.direction == "B_to_A") == 1
+    assert sum(1 for row in deduped if row.snippet == "A activates B in hypoxia.") == 1
+    assert any(row.snippet == "A activates B after serum starvation." for row in deduped)
+
+
+def test_paper_extractor_persist_counts_aliases_once_per_resolved_entity():
+    engine, conn, repos = _repos()
+    try:
+        conn.execute(db.papers.insert().values(
+            id="pmid:1",
+            source="pubmed",
+            title="Alias paper",
+            abstract="A" * 100,
+            authors="[]",
+            journal="J",
+            year=2024,
+            doi=None,
+            pmc_id=None,
+            fetch_status="abstract_only",
+            extraction_status="pending",
+            query_ids="[]",
+            created_at="2026-03-22T00:00:00Z",
+            updated_at="2026-03-22T00:00:00Z",
+        ))
+        normalizer = EntityNormalizer(
+            entity_repo=repos.entities,
+            synonyms_path="nonexistent_test_synonyms.yaml",
+            entity_resolver=None,
+        )
+        extractor = PaperExtractor(config=_config(), llm=None, normalizer=normalizer)
+        result = ExtractionResult(
+            paper_id="pmid:1",
+            entities=[
+                ExtractedEntityRaw(name="TP53", entity_type="protein", synonyms=["p53"]),
+                ExtractedEntityRaw(name="p53", entity_type="protein"),
+            ],
+            interactions=[],
+        )
+
+        new_entities, _new_interactions, _new_evidence = extractor.persist(result, repos)
+        conn.commit()
+
+        rows = conn.execute(
+            select(db.entities.c.canonical_name, db.entities.c.paper_count)
+            .order_by(db.entities.c.canonical_name)
+        ).mappings().all()
+
+        assert new_entities == 1
+        assert len(rows) == 1
+        assert rows[0]["paper_count"] == 1
+    finally:
+        conn.close()
+        engine.dispose()
+
+
+def test_paper_extractor_persist_counts_interaction_only_entities():
+    engine, conn, repos = _repos()
+    try:
+        conn.execute(db.papers.insert().values(
+            id="pmid:2",
+            source="pubmed",
+            title="Interaction-only paper",
+            abstract="B" * 100,
+            authors="[]",
+            journal="J",
+            year=2024,
+            doi=None,
+            pmc_id=None,
+            fetch_status="abstract_only",
+            extraction_status="pending",
+            query_ids="[]",
+            created_at="2026-03-22T00:00:00Z",
+            updated_at="2026-03-22T00:00:00Z",
+        ))
+        normalizer = EntityNormalizer(
+            entity_repo=repos.entities,
+            synonyms_path="nonexistent_test_synonyms.yaml",
+            entity_resolver=None,
+        )
+        extractor = PaperExtractor(config=_config(), llm=None, normalizer=normalizer)
+        result = ExtractionResult(
+            paper_id="pmid:2",
+            entities=[],
+            interactions=[
+                ExtractedInteractionRaw(
+                    entity_a="NovelA",
+                    entity_b="NovelB",
+                    interaction_type=InteractionType.SIGNALING,
+                    direction="A_to_B",
+                    effect="activates",
+                    evidence_type=EvidenceType.IN_VITRO,
+                    confidence="high",
+                    confidence_score=0.8,
+                    snippet="NovelA activates NovelB.",
+                )
+            ],
+        )
+
+        new_entities, new_interactions, new_evidence = extractor.persist(result, repos)
+        conn.commit()
+
+        rows = conn.execute(
+            select(db.entities.c.canonical_name, db.entities.c.paper_count)
+            .order_by(db.entities.c.canonical_name)
+        ).mappings().all()
+
+        assert new_entities == 2
+        assert new_interactions == 1
+        assert new_evidence == 1
+        assert [row["paper_count"] for row in rows] == [1, 1]
+    finally:
+        conn.close()
+        engine.dispose()
+
+
+def test_run_extraction_phase_fetches_pmc_full_text_only_once_per_paper():
+    engine, conn, repos = _repos()
+    try:
+        main_module._shutdown = False
+        conn.execute(db.papers.insert().values(
+            id="pmid:3",
+            source="pubmed",
+            title="PMC paper",
+            abstract="short abstract" * 10,
+            authors="[]",
+            journal="J",
+            year=2024,
+            doi=None,
+            pmc_id="PMC123",
+            fetch_status="abstract_only",
+            extraction_status="pending",
+            query_ids="[]",
+            created_at="2026-03-22T00:00:00Z",
+            updated_at="2026-03-22T00:00:00Z",
+        ))
+        pmc = _RecordingPMC("full text " * 20)
+        extractor = _StubExtractor(
+            ExtractionResult(
+                paper_id="pmid:3",
+                entities=[],
+                interactions=[],
+            )
+        )
+
+        stats = run_extraction_phase(repos, _config(), extractor, pmc, conn)
+        conn.commit()
+
+        status = conn.execute(
+            select(db.papers.c.extraction_status).where(db.papers.c.id == "pmid:3")
+        ).scalar_one()
+
+        assert stats["papers_processed"] == 1
+        assert status == "done"
+        assert pmc.calls == ["PMC123"]
+        assert extractor.extract_calls == [("pmid:3", "full text " * 20)]
+    finally:
+        conn.close()
+        engine.dispose()
+
+
+def test_apply_migrations_removes_legacy_raw_llm_response_column():
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE papers (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                title TEXT,
+                abstract TEXT,
+                authors TEXT,
+                journal TEXT,
+                year INTEGER,
+                doi TEXT,
+                pmc_id TEXT,
+                fetch_status TEXT NOT NULL DEFAULT 'pending',
+                extraction_status TEXT NOT NULL DEFAULT 'pending',
+                extraction_error TEXT,
+                raw_llm_response TEXT,
+                query_ids TEXT,
+                priority INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """))
+        conn.execute(text("""
+            INSERT INTO papers (
+                id, source, title, abstract, authors, journal, year, doi, pmc_id,
+                fetch_status, extraction_status, extraction_error, raw_llm_response,
+                query_ids, priority, created_at, updated_at
+            ) VALUES (
+                'pmid:legacy', 'pubmed', 'Legacy paper', 'abstract', '[]', 'J', 2024, NULL, NULL,
+                'abstract_only', 'pending', NULL, '{"legacy": true}', '[]', 0,
+                '2026-03-22T00:00:00Z', '2026-03-22T00:00:00Z'
+            )
+        """))
+
+    db.create_all(engine)
+
+    with engine.connect() as conn:
+        column_names = [col["name"] for col in inspect(engine).get_columns("papers")]
+        row = conn.execute(select(db.papers).where(db.papers.c.id == "pmid:legacy")).mappings().one()
+
+    assert "raw_llm_response" not in column_names
+    assert row["title"] == "Legacy paper"
+    assert row["fetch_status"] == "abstract_only"
+    engine.dispose()

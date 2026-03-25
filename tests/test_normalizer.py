@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import MagicMock, patch
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from autobioresearch import database as db
 from autobioresearch.crawlers.entity_resolvers import EntityResolver, ResolvedEntity
@@ -26,14 +26,7 @@ from autobioresearch.storage.repositories import EntityRepo
 def engine():
     """Fresh in-memory SQLite DB for each test."""
     eng = create_engine("sqlite:///:memory:")
-    db.metadata.create_all(eng)
-    # Add unique constraint on entity_synonyms that the real DB has
-    with eng.connect() as conn:
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_entity_synonym "
-            "ON entity_synonyms (synonym)"
-        ))
-        conn.commit()
+    db.create_all(eng)
     return eng
 
 
@@ -103,6 +96,30 @@ class TestExactSynonymMatch:
         eid1 = normalizer.normalize(_raw("TP53"))
         eid2 = normalizer.normalize(_raw("tp53"))
         assert eid1 == eid2
+
+    def test_overlap_same_synonym_is_disambiguated_by_entity_type(self, repo, conn):
+        normalizer = _normalizer(repo)
+        protein_id = normalizer.normalize(_raw("EGFR", entity_type="protein"))
+        metabolite_id = normalizer.normalize(_raw("glucose", entity_type="metabolite"))
+        repo.add_synonyms(protein_id, ["shared_alias"])
+        repo.add_synonyms(metabolite_id, ["shared_alias"])
+        normalizer.rebuild_cache()
+
+        assert protein_id != metabolite_id
+        assert normalizer.normalize(_raw("shared_alias", entity_type="protein")) == protein_id
+        assert normalizer.normalize(_raw("shared_alias", entity_type="metabolite")) == metabolite_id
+
+    def test_overlap_same_synonym_is_disambiguated_by_organism(self, repo, conn):
+        normalizer = _normalizer(repo)
+        human_id = normalizer.normalize(_raw("MAPK1", entity_type="protein", organism="Homo sapiens"))
+        mouse_id = normalizer.normalize(_raw("Mapk1_mouse", entity_type="protein", organism="Mus musculus"))
+        repo.add_synonyms(human_id, ["erk_shared"])
+        repo.add_synonyms(mouse_id, ["erk_shared"])
+        normalizer.rebuild_cache()
+
+        assert human_id != mouse_id
+        assert normalizer.normalize(_raw("erk_shared", entity_type="protein", organism="Homo sapiens")) == human_id
+        assert normalizer.normalize(_raw("erk_shared", entity_type="protein", organism="Mus musculus")) == mouse_id
 
     def test_new_synonyms_merged_on_hit(self, repo, conn):
         normalizer = _normalizer(repo)

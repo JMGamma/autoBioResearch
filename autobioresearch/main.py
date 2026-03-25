@@ -238,41 +238,7 @@ def run_fetch_phase(
 
 
 # ---------------------------------------------------------------------------
-# Full text fetching (Arm 1b)
-# ---------------------------------------------------------------------------
-
-def run_full_text_phase(
-    repos: Repositories,
-    config: AppConfig,
-    pmc_fetcher: PMCFullTextFetcher,
-) -> int:
-    """
-    Transiently fetch full text for papers that have PMC IDs.
-    Full text is NEVER written to DB — only used to upgrade extraction text in memory.
-    Returns count of papers upgraded.
-    """
-    candidates = repos.papers.get_full_text_candidates(config.max_full_text_per_cycle)
-    if not candidates:
-        return 0
-
-    logger.info(f"Checking {len(candidates)} papers for PMC full text")
-    upgraded = 0
-    for paper in candidates:
-        pmc_id = paper.get("pmc_id")
-        if not pmc_id:
-            continue
-        full_text = pmc_fetcher.fetch(pmc_id)
-        if full_text:
-            repos.papers.mark_fetch_status(paper["id"], "full_text_available")
-            upgraded += 1
-
-    if upgraded:
-        logger.info(f"Upgraded {upgraded} papers to full_text_available status")
-    return upgraded
-
-
-# ---------------------------------------------------------------------------
-# Extraction phase (Arm 1c)
+# Extraction phase (Arm 1b)
 # ---------------------------------------------------------------------------
 
 def run_extraction_phase(
@@ -334,7 +300,7 @@ def run_extraction_phase(
         text = abstract
         full_text_used = False
 
-        if pmc_id and paper_row.get("fetch_status") == "full_text_available":
+        if pmc_id:
             full_text = pmc_fetcher.fetch(pmc_id)
             if full_text and len(full_text) > len(abstract):
                 text = full_text
@@ -359,7 +325,7 @@ def run_extraction_phase(
             })
             conflicts_reopened += repos.conflicts.reopen_for_interactions(interaction_ids)
 
-            repos.papers.mark_extraction_done(paper_id, raw_llm_response=None)
+            repos.papers.mark_extraction_done(paper_id)
             papers_processed += 1
             total_entities += ne
             total_interactions += ni
@@ -520,19 +486,14 @@ def run_cycle(
         fetch_stats = run_fetch_phase(repos, config, pubmed, s2)
         conn.commit()
 
-        # --- Phase 2: Upgrade to full text (transient) ---
-        _set_runtime_context(phase="fetch_full_text")
-        run_full_text_phase(repos, config, pmc_fetcher)
-        conn.commit()
-
-        # --- Phase 3: Extract ---
+        # --- Phase 2: Extract ---
         # conn is passed so run_extraction_phase can commit after each paper.
         _set_runtime_context(phase="extract")
         extraction_stats = run_extraction_phase(
             repos, config, extractor, pmc_fetcher, conn
         )
 
-        # --- Phase 4: Detect conflicts (Arm 2) ---
+        # --- Phase 3: Detect conflicts (Arm 2) ---
         new_conflicts = 0
         conflicts_resolved = 0
         if conflict_detector:
@@ -540,7 +501,7 @@ def run_cycle(
             new_conflicts = conflict_detector.detect(repos, config)
             conn.commit()
 
-        # --- Phase 5: Classify + resolve conflicts ---
+        # --- Phase 4: Classify + resolve conflicts ---
         if conflict_resolver:
             _set_runtime_context(phase="resolve_conflicts")
             conflicts_resolved = conflict_resolver.analyze_and_resolve(repos, config)
@@ -555,12 +516,12 @@ def run_cycle(
         verification_stats = run_verification_phase(repos, config, verifier)
         conn.commit()
 
-        # --- Phase 6: Generate targeted next-step queries ---
+        # --- Phase 5: Generate targeted next-step queries ---
         _set_runtime_context(phase="generate_targeted_queries")
         gap_queries = run_query_generation_phase(repos, config, planner) if planner else 0
         conn.commit()
 
-        # --- Phase 7: Score ---
+        # --- Phase 6: Score ---
         _set_runtime_context(phase="score")
         score, stats = compute_score(repos, config)
         repos.metrics.log(

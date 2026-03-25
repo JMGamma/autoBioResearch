@@ -74,9 +74,18 @@ class ConflictDetector:
         context_diff: dict = {}
         conflict_axis = "effect"
 
-        # Different directions?
-        if int_a.get("direction") != int_b.get("direction") and \
-           "undirected" not in (int_a.get("direction", ""), int_b.get("direction", "")):
+        effect_differs = (
+            int_a.get("effect") is not None
+            and int_b.get("effect") is not None
+            and int_a.get("effect") != int_b.get("effect")
+        )
+        direction_differs = (
+            int_a.get("direction") != int_b.get("direction")
+            and "undirected" not in (int_a.get("direction", ""), int_b.get("direction", ""))
+        )
+
+        # Prefer effect conflicts when both dimensions differ; otherwise surface direction-only disputes.
+        if direction_differs and not effect_differs:
             conflict_axis = "direction"
 
         # Check organism overlap

@@ -44,6 +44,7 @@ class EntityNormalizer:
         self._threshold = fuzzy_threshold
         self._resolver = entity_resolver   # None → external resolution disabled
         self._synonym_cache: dict[str, str] = {}  # synonym_lower -> entity_id
+        self._synonym_candidate_cache: dict[str, list[dict]] = {}
         # Maps entity_type -> list of (name_lower, entity_id) covering BOTH
         # canonical names and all registered synonyms so fuzzy matching is
         # comprehensive rather than only checking the canonical string.
@@ -55,17 +56,21 @@ class EntityNormalizer:
     # ------------------------------------------------------------------
 
     def normalize(self, raw: ExtractedEntityRaw) -> str:
+        entity_id, _created_new = self.normalize_with_metadata(raw)
+        return entity_id
+
+    def normalize_with_metadata(self, raw: ExtractedEntityRaw) -> tuple[str, bool]:
         """
         Resolve a raw extracted entity to a canonical entity_id.
         Creates a new entity if no match found.
-        Returns entity_id.
+        Returns (entity_id, created_new).
         """
         names_to_check = [raw.name] + raw.synonyms
 
         # 1. Exact synonym match (cache first, then DB)
-        entity_id = self._exact_match(names_to_check, raw.entity_type.value)
+        entity_id = self._exact_match(names_to_check, raw.entity_type.value, raw.organism)
         if entity_id:
-            return entity_id
+            return entity_id, False
 
         # 2. External resolver (UniProt / ChEBI) — enriches the synonym set,
         #    then retries exact match with the expanded name list.
@@ -87,11 +92,17 @@ class EntityNormalizer:
 
                 # Retry exact match — one of the resolver's aliases may already
                 # be registered in the DB under a different paper's entity.
-                entity_id = self._exact_match(names_to_check, raw.entity_type.value)
+                entity_id = self._exact_match(names_to_check, raw.entity_type.value, raw.organism)
                 if entity_id:
                     self._repo.add_synonyms(entity_id, names_to_check, source="uniprot_resolved")
-                    self._update_cache(names_to_check, entity_id, raw.entity_type.value)
-                    return entity_id
+                    self._update_cache(
+                        names_to_check,
+                        entity_id,
+                        entity_type=raw.entity_type.value,
+                        organism=resolved.organism or raw.organism,
+                        canonical_name=resolved.canonical_name or raw.name,
+                    )
+                    return entity_id, False
 
                 # Include accession (e.g. P04637, CHEBI:15355) as a synonym
                 if resolved.accession:
@@ -101,8 +112,14 @@ class EntityNormalizer:
         entity_id = self._fuzzy_match(raw.name, raw.entity_type)
         if entity_id:
             self._repo.add_synonyms(entity_id, names_to_check)
-            self._update_cache(names_to_check, entity_id, entity_type=raw.entity_type.value)
-            return entity_id
+            self._update_cache(
+                names_to_check,
+                entity_id,
+                entity_type=raw.entity_type.value,
+                organism=raw.organism,
+                canonical_name=raw.name,
+            )
+            return entity_id, False
 
         # 4. Create new entity — prefer resolver's canonical name over the LLM's
         #    raw string (e.g. "TP53" from UniProt beats "tumor suppressor p53")
@@ -113,17 +130,29 @@ class EntityNormalizer:
                 synonyms=list({s for s in names_to_check if s != resolved.canonical_name}),
                 organism=resolved.organism or raw.organism,
             )
-        return self._create_entity(raw)
+        return self._create_entity(raw), True
 
-    def _exact_match(self, names: list[str], entity_type: str) -> Optional[str]:
+    def _exact_match(
+        self,
+        names: list[str],
+        entity_type: str,
+        organism: Optional[str] = None,
+    ) -> Optional[str]:
         """Check all names against the synonym table. Merges new synonyms on hit."""
         for name in names:
-            entity_id = self._lookup_synonym(name)
+            entity_id = self._lookup_synonym(name, entity_type=entity_type, organism=organism)
             if entity_id:
                 new_syns = [n for n in names if n.lower() != name.lower()]
                 if new_syns:
                     self._repo.add_synonyms(entity_id, new_syns)
-                    self._update_cache(new_syns, entity_id, entity_type=entity_type)
+                    entity = self._repo.get_by_id(entity_id) or {}
+                    self._update_cache(
+                        new_syns,
+                        entity_id,
+                        entity_type=entity.get("entity_type") or entity_type,
+                        organism=entity.get("organism"),
+                        canonical_name=entity.get("canonical_name"),
+                    )
                 return entity_id
         return None
 
@@ -134,20 +163,99 @@ class EntityNormalizer:
     def rebuild_cache(self):
         """Reload synonym->entity_id mapping from DB (call after bulk inserts)."""
         self._synonym_cache.clear()
+        self._synonym_candidate_cache.clear()
         self._fuzzy_cache.clear()
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _lookup_synonym(self, name: str) -> Optional[str]:
+    def _lookup_synonym(
+        self,
+        name: str,
+        *,
+        entity_type: Optional[str] = None,
+        organism: Optional[str] = None,
+    ) -> Optional[str]:
         key = name.lower().strip()
-        if key in self._synonym_cache:
+        if key in self._synonym_cache and entity_type is None and organism is None:
             return self._synonym_cache[key]
-        entity_id = self._repo.find_by_synonym(key)
-        if entity_id:
+        candidates = self._synonym_candidate_cache.get(key)
+        if candidates is None:
+            candidates = self._repo.find_by_synonym_candidates(key)
+            self._synonym_candidate_cache[key] = candidates
+
+        entity_id = self._disambiguate_synonym_candidates(
+            candidates,
+            lookup_key=key,
+            entity_type=entity_type,
+            organism=organism,
+        )
+        if entity_id and len({row["entity_id"] for row in candidates}) == 1:
             self._synonym_cache[key] = entity_id
         return entity_id
+
+    def _disambiguate_synonym_candidates(
+        self,
+        candidates: list[dict],
+        *,
+        lookup_key: str,
+        entity_type: Optional[str],
+        organism: Optional[str],
+    ) -> Optional[str]:
+        if not candidates:
+            return None
+
+        def unique_id(rows: list[dict]) -> Optional[str]:
+            ids = {row["entity_id"] for row in rows}
+            return next(iter(ids)) if len(ids) == 1 else None
+
+        unique = unique_id(candidates)
+        if unique:
+            return unique
+
+        organism_lower = organism.lower().strip() if organism else None
+
+        def by_type(rows: list[dict], allowed_types: set[str]) -> list[dict]:
+            return [row for row in rows if row.get("entity_type") in allowed_types]
+
+        if organism_lower:
+            exact = [
+                row for row in candidates
+                if (row.get("organism") or "").lower().strip() == organism_lower
+            ]
+            if entity_type:
+                narrowed = by_type(exact, {entity_type})
+                unique = unique_id(narrowed)
+                if unique:
+                    return unique
+            unique = unique_id(exact)
+            if unique:
+                return unique
+
+        if entity_type:
+            exact_type = by_type(candidates, {entity_type})
+            unique = unique_id(exact_type)
+            if unique:
+                return unique
+
+            for group in _CROSS_TYPE_GROUPS:
+                if entity_type in group:
+                    cross_type = by_type(candidates, set(group))
+                    unique = unique_id(cross_type)
+                    if unique:
+                        return unique
+                    break
+
+        canonical_matches = [
+            row for row in candidates
+            if (row.get("canonical_name") or "").lower().strip() == lookup_key
+        ]
+        unique = unique_id(canonical_matches)
+        if unique:
+            return unique
+
+        return None
 
     def _fuzzy_match(self, name: str, entity_type: EntityType) -> Optional[str]:
         """
@@ -197,16 +305,41 @@ class EntityNormalizer:
 
         all_names = [raw.name] + raw.synonyms
         self._repo.add_synonyms(entity_id, all_names, source="llm_extracted")
-        self._update_cache(all_names, entity_id, entity_type=raw.entity_type.value)
+        self._update_cache(
+            all_names,
+            entity_id,
+            entity_type=raw.entity_type.value,
+            organism=raw.organism,
+            canonical_name=raw.name,
+        )
         logger.debug(f"Created new entity: '{raw.name}' ({raw.entity_type}) -> {entity_id}")
         return entity_id
 
-    def _update_cache(self, names: list[str], entity_id: str, entity_type: Optional[str] = None):
+    def _update_cache(
+        self,
+        names: list[str],
+        entity_id: str,
+        entity_type: Optional[str] = None,
+        organism: Optional[str] = None,
+        canonical_name: Optional[str] = None,
+    ):
+        candidate = {
+            "entity_id": entity_id,
+            "entity_type": entity_type,
+            "organism": organism,
+            "canonical_name": canonical_name,
+        }
         for name in names:
             key = name.lower().strip()
             if not key:
                 continue
-            self._synonym_cache[key] = entity_id
+            cached_candidates = self._synonym_candidate_cache.setdefault(key, [])
+            if not any(row["entity_id"] == entity_id for row in cached_candidates):
+                cached_candidates.append(candidate.copy())
+            if len({row["entity_id"] for row in cached_candidates}) == 1:
+                self._synonym_cache[key] = entity_id
+            else:
+                self._synonym_cache.pop(key, None)
             # Keep the fuzzy cache live so entities created earlier in a cycle
             # are candidates for papers processed later in the same cycle.
             if entity_type and entity_type in self._fuzzy_cache:

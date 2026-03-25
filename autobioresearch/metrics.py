@@ -4,7 +4,7 @@ Score computation for the autoresearch loop.
 score = (N_entities × N_interactions) / (1 + penalty × weighted_conflict_sum)
 
 weighted_conflict_sum = sum of penalty_weight over all open conflicts
-  true_conflict=1.0, ambiguous=0.5, context_dependent=0.2
+  true_conflict=1.0, ambiguous=0.5, context_dependent=0.0
 
 Higher score = larger, less-conflicted knowledge base.
 """
