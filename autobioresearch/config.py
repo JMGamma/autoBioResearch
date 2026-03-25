@@ -44,6 +44,7 @@ class AppConfig(BaseSettings):
     pubmed_requests_per_second: float = 3.0
     semantic_scholar_requests_per_second: float = 1.0
     ncbi_api_key: Optional[str] = Field(default=None, alias="NCBI_API_KEY")
+    semantic_scholar_api_key: Optional[str] = Field(default=None, alias="SEMANTIC_SCHOLAR_API_KEY")
 
     # --- Extraction ---
     max_chunk_chars: int = 6000

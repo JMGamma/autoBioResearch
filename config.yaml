@@ -6,7 +6,7 @@
 # Use "anthropic" for Claude via Anthropic API (requires ANTHROPIC_API_KEY in .env)
 # Use "openai_compatible" for local LLMs (Ollama, LM Studio, vLLM, llama.cpp server, etc.)
 llm_api_type: "openai_compatible"
-llm_model: "qwen/qwen3.5-27b-claude-4.6-opus-reasoning-distilled"
+llm_model: "qwen/qwen3.5-9b-claude-4.6-opus-reasoning-distilled-v2"
 # For openai_compatible mode, set the base URL of your local LLM REST server:
 llm_base_url: "http://127.0.0.1:11435/v1"   # Ollama
 # llm_base_url: "http://localhost:1234/v1"    # LM Studio

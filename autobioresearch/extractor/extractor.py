@@ -48,17 +48,17 @@ def _log_truncation_review(
     attempts: int,
 ) -> None:
     """Write a structured entry to the truncation review log for human triage."""
-    pmid_num = paper_id.removeprefix("pmid:")
-    pubmed_url = (
-        f"https://pubmed.ncbi.nlm.nih.gov/{pmid_num}/"
-        if pmid_num.isdigit()
-        else "n/a"
-    )
+    if paper_id.startswith("pmid:"):
+        paper_url = f"https://pubmed.ncbi.nlm.nih.gov/{paper_id.removeprefix('pmid:')}/"
+    elif paper_id.startswith("s2:"):
+        paper_url = f"https://www.semanticscholar.org/paper/{paper_id.removeprefix('s2:')}"
+    else:
+        paper_url = "n/a"
     title_short = (title or "")[:120] + ("…" if len(title or "") > 120 else "")
     _truncation_review_logger.warning(
         "\n"
         f"  paper_id    : {paper_id}\n"
-        f"  pubmed_url  : {pubmed_url}\n"
+        f"  url         : {paper_url}\n"
         f"  title       : {title_short}\n"
         f"  chunk       : {chunk_start}–{chunk_end} chars\n"
         f"  max_tokens  : {max_tokens}\n"

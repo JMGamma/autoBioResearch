@@ -17,7 +17,7 @@ def setup_truncation_review_logging(log_file: str) -> None:
 
     if not rl.handlers:
         fmt = logging.Formatter(
-            "%(asctime)s REVIEW   %(name)s:",
+            "%(asctime)s REVIEW   %(name)s:%(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S",
         )
         fh = logging.handlers.RotatingFileHandler(

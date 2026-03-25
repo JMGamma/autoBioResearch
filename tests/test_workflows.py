@@ -5,7 +5,11 @@ from sqlalchemy import create_engine, inspect, select, text
 from autobioresearch import database as db
 from autobioresearch.config import AppConfig
 from autobioresearch import main as main_module
-from autobioresearch.main import run_extraction_phase, run_fetch_phase
+from autobioresearch.main import (
+    run_extraction_phase,
+    run_fetch_phase,
+    run_interleaved_fetch_extraction_phase,
+)
 from autobioresearch.metrics import compute_score
 from autobioresearch.extractor.extractor import PaperExtractor
 from autobioresearch.extractor.normalizer import EntityNormalizer
@@ -101,6 +105,36 @@ class _StubExtractor:
     def persist(self, result: ExtractionResult, repos: Repositories):
         self.persist_calls += 1
         return (0, 0, 0)
+
+
+class _OrderingPubMed:
+    def __init__(self, events: list[str]):
+        self.events = events
+        self.counter = 0
+
+    def search(self, query: str, max_results: int = 50):
+        self.counter += 1
+        paper_id = f"pmid:{self.counter}"
+        self.events.append(f"fetch:{query}")
+        return [
+            Paper(
+                id=paper_id,
+                source="pubmed",
+                title=f"Paper for {query}",
+                abstract="A" * 100,
+                fetch_status=FetchStatus.ABSTRACT_ONLY,
+            )
+        ]
+
+
+class _OrderingExtractor(_StubExtractor):
+    def __init__(self, events: list[str]):
+        super().__init__(ExtractionResult(paper_id="", entities=[], interactions=[]))
+        self.events = events
+
+    def extract(self, paper_id: str, title: str, text: str) -> ExtractionResult:
+        self.events.append(f"extract:{paper_id}")
+        return ExtractionResult(paper_id=paper_id, entities=[], interactions=[])
 
 
 def _config() -> AppConfig:
@@ -475,6 +509,51 @@ def test_fetch_phase_marks_failed_queries_and_uses_configured_papers_per_query()
         assert pubmed.calls == [("tp53", 7)]
         assert stats["queries_failed"] == 1
         assert stats["papers_fetched_total"] == 0
+    finally:
+        conn.close()
+
+
+def test_interleaved_fetch_extraction_spaces_query_fetches():
+    engine, conn, repos = _repos()
+    try:
+        repos.queries.insert(SearchQuery(
+            query_text="query one",
+            source_api="pubmed",
+            query_type=QueryType.INITIAL,
+            origin="seed",
+        ))
+        repos.queries.insert(SearchQuery(
+            query_text="query two",
+            source_api="pubmed",
+            query_type=QueryType.INITIAL,
+            origin="seed",
+        ))
+        conn.commit()
+
+        events: list[str] = []
+        pubmed = _OrderingPubMed(events)
+        extractor = _OrderingExtractor(events)
+        pmc = _RecordingPMC("")
+
+        fetch_stats, extraction_stats = run_interleaved_fetch_extraction_phase(
+            repos,
+            _config(),
+            pubmed,
+            _NoopSemanticScholar(),
+            extractor,
+            pmc,
+            conn,
+        )
+        conn.commit()
+
+        assert fetch_stats["queries_run"] == 2
+        assert extraction_stats["papers_processed"] == 2
+        assert events == [
+            "fetch:query one",
+            "extract:pmid:1",
+            "fetch:query two",
+            "extract:pmid:2",
+        ]
     finally:
         conn.close()
         engine.dispose()

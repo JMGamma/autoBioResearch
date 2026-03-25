@@ -13,6 +13,7 @@ import argparse
 import atexit
 import json
 import logging
+import math
 import os
 import signal
 import sys
@@ -158,6 +159,75 @@ def _fetch_papers_for_query(
         return False, []
 
 
+def _empty_fetch_stats() -> dict:
+    return {
+        "queries_run": 0,
+        "queries_failed": 0,
+        "queries_with_new_papers": 0,
+        "papers_fetched_total": 0,
+        "papers_fetched_new": 0,
+    }
+
+
+def _empty_extraction_stats() -> dict:
+    return {
+        "papers_processed": 0,
+        "papers_failed": 0,
+        "new_entities": 0,
+        "new_interactions": 0,
+        "new_evidence": 0,
+        "claims_verified": 0,
+        "claims_needing_review": 0,
+        "query_linked_evidence": 0,
+        "conflicts_reopened": 0,
+    }
+
+
+def _merge_stats(into: dict, delta: dict) -> dict:
+    for key, value in delta.items():
+        into[key] = into.get(key, 0) + value
+    return into
+
+
+def _fetch_single_query(
+    repos: Repositories,
+    config: AppConfig,
+    query_row: dict,
+    pubmed: PubMedCrawler,
+    s2: SemanticScholarCrawler,
+) -> dict:
+    """Fetch papers for one query, persist them, and update query status."""
+    q = dict(query_row)
+    q["papers_per_query"] = config.papers_per_query
+    repos.queries.mark_running(q["id"])
+
+    success, papers = _fetch_papers_for_query(q, pubmed, s2)
+    if not success:
+        repos.queries.mark_failed(q["id"], error="fetch_failed")
+        return {
+            "queries_run": 1,
+            "queries_failed": 1,
+            "queries_with_new_papers": 0,
+            "papers_fetched_total": 0,
+            "papers_fetched_new": 0,
+        }
+
+    is_conflict_query = q.get("query_type") == QueryType.CONFLICT_RESOLUTION.value
+    for p in papers:
+        p.query_ids = [q["id"]]
+        p.priority = 1 if is_conflict_query else 0
+
+    new_count = repos.papers.upsert_many(papers)
+    repos.queries.mark_done(q["id"], papers_found=len(papers), papers_new=new_count)
+    return {
+        "queries_run": 1,
+        "queries_failed": 0,
+        "queries_with_new_papers": 1 if papers else 0,
+        "papers_fetched_total": len(papers),
+        "papers_fetched_new": new_count,
+    }
+
+
 def run_fetch_phase(
     repos: Repositories,
     config: AppConfig,
@@ -247,25 +317,16 @@ def run_extraction_phase(
     extractor: PaperExtractor,
     pmc_fetcher: PMCFullTextFetcher,
     conn,
+    limit: int | None = None,
 ) -> dict:
     """
     Extract entities/interactions from pending papers.
     Returns extraction telemetry for the cycle.
     Commits after each paper so data is visible in the DB progressively.
     """
-    pending = repos.papers.get_pending_extraction(config.papers_per_cycle)
+    pending = repos.papers.get_pending_extraction(limit or config.papers_per_cycle)
     if not pending:
-        return {
-            "papers_processed": 0,
-            "papers_failed": 0,
-            "new_entities": 0,
-            "new_interactions": 0,
-            "new_evidence": 0,
-            "claims_verified": 0,
-            "claims_needing_review": 0,
-            "query_linked_evidence": 0,
-            "conflicts_reopened": 0,
-        }
+        return _empty_extraction_stats()
 
     # Refresh the normalizer's DB connection — the one used at construction is closed.
     extractor._normalizer.set_repo(repos.entities)
@@ -375,6 +436,79 @@ def run_extraction_phase(
     }
 
 
+def run_interleaved_fetch_extraction_phase(
+    repos: Repositories,
+    config: AppConfig,
+    pubmed: PubMedCrawler,
+    s2: SemanticScholarCrawler,
+    extractor: PaperExtractor,
+    pmc_fetcher: PMCFullTextFetcher,
+    conn,
+) -> tuple[dict, dict]:
+    """
+    Interleave retrieval with extraction so API calls are naturally spaced out by
+    slower per-paper processing work instead of bursting at cycle start.
+    """
+    pending = repos.queries.get_pending(config.queries_per_cycle)
+    if not pending:
+        return _empty_fetch_stats(), run_extraction_phase(
+            repos, config, extractor, pmc_fetcher, conn, limit=config.papers_per_cycle
+        )
+
+    logger.info(
+        "Interleaving fetch and extraction for %d queries with up to %d papers this cycle",
+        len(pending),
+        config.papers_per_cycle,
+    )
+
+    fetch_stats = _empty_fetch_stats()
+    extraction_stats = _empty_extraction_stats()
+
+    for idx, query_row in enumerate(pending):
+        if _shutdown:
+            logger.info("Shutdown requested — stopping fetch/extract interleave early.")
+            break
+
+        _merge_stats(fetch_stats, _fetch_single_query(repos, config, query_row, pubmed, s2))
+        conn.commit()
+
+        consumed = extraction_stats["papers_processed"] + extraction_stats["papers_failed"]
+        remaining_paper_budget = max(0, config.papers_per_cycle - consumed)
+        remaining_queries = len(pending) - idx
+        if remaining_paper_budget <= 0:
+            continue
+
+        slice_size = max(1, math.ceil(remaining_paper_budget / remaining_queries))
+        _merge_stats(
+            extraction_stats,
+            run_extraction_phase(
+                repos,
+                config,
+                extractor,
+                pmc_fetcher,
+                conn,
+                limit=min(slice_size, remaining_paper_budget),
+            ),
+        )
+
+    consumed = extraction_stats["papers_processed"] + extraction_stats["papers_failed"]
+    remaining_paper_budget = max(0, config.papers_per_cycle - consumed)
+    if remaining_paper_budget > 0 and not _shutdown:
+        _merge_stats(
+            extraction_stats,
+            run_extraction_phase(
+                repos,
+                config,
+                extractor,
+                pmc_fetcher,
+                conn,
+                limit=remaining_paper_budget,
+            ),
+        )
+
+    return fetch_stats, extraction_stats
+
+
 # ---------------------------------------------------------------------------
 # Query generation for score-driven targeted search
 # ---------------------------------------------------------------------------
@@ -481,16 +615,10 @@ def run_cycle(
             planner.plan_pending_queries(repos, config)
             conn.commit()
 
-        # --- Phase 1: Fetch papers ---
-        _set_runtime_context(phase="fetch_papers")
-        fetch_stats = run_fetch_phase(repos, config, pubmed, s2)
-        conn.commit()
-
-        # --- Phase 2: Extract ---
-        # conn is passed so run_extraction_phase can commit after each paper.
-        _set_runtime_context(phase="extract")
-        extraction_stats = run_extraction_phase(
-            repos, config, extractor, pmc_fetcher, conn
+        # --- Phase 1-2: Interleave fetch + extract ---
+        _set_runtime_context(phase="fetch_extract")
+        fetch_stats, extraction_stats = run_interleaved_fetch_extraction_phase(
+            repos, config, pubmed, s2, extractor, pmc_fetcher, conn
         )
 
         # --- Phase 3: Detect conflicts (Arm 2) ---
@@ -613,6 +741,7 @@ def main():
     )
     s2 = SemanticScholarCrawler(
         requests_per_second=config.semantic_scholar_requests_per_second,
+        semantic_scholar_api_key=config.semantic_scholar_api_key,
     )
     pmc_fetcher = PMCFullTextFetcher(ncbi_api_key=config.ncbi_api_key)
     llm = LLMClient(config)
