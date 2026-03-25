@@ -137,6 +137,8 @@ class LLMClient:
                     return self._call_anthropic(system, user, tool)
                 else:
                     return self._call_openai_compatible(system, user, tool_function)
+            except LLMTruncatedError:
+                raise  # truncation retries are handled by the caller (extractor); don't loop here
             except Exception as e:
                 if attempt < self._config.llm_max_retries:
                     wait = self._config.llm_retry_backoff_seconds * (2 ** attempt)

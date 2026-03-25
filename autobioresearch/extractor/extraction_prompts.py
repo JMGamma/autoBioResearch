@@ -16,6 +16,41 @@ nematodes (C. elegans), fish (zebrafish, Danio rerio, etc.), frogs (Xenopus, etc
 bacteria, archaea, or viruses studied only in non-mammalian hosts. \
 If a paper studies both yeast and human cells, extract only the human/mammalian findings.
 
+EXCEPTION — EXTERNAL ORGANISMS INTERACTING WITH MAMMALIAN BIOLOGY:
+Pathogens and symbionts are valid entities when they natively interact with mammalian \
+biology (e.g. SARS-CoV-2 spike protein binding human ACE2, H. pylori activating NF-κB \
+in gastric epithelium, Lactobacillus reuteri modulating gut immune cells). Extract these \
+with entity_type "pathogen" or "symbiont" as appropriate.
+
+CRITICAL EXCLUSION — HETEROLOGOUS EXPRESSION SYSTEMS:
+DO NOT extract interactions where a non-mammalian organism is used purely as a \
+production or assay host for mammalian proteins. Skip interactions when: \
+E. coli or yeast is used solely to express/purify a recombinant mammalian protein; \
+baculovirus/insect-cell systems are used to produce a mammalian kinase or receptor; \
+yeast two-hybrid is used as a detection platform for mammalian protein interactions; \
+Xenopus oocytes are injected with mammalian mRNA only for electrophysiology readouts. \
+The test: is the non-mammalian organism acting as an endogenous biological agent in the \
+interaction, or merely a heterologous production/assay host? Only the former is in scope.
+
+ENTITY TYPE GUIDANCE:
+Use the most specific type available. Key distinctions:
+- "modification": Use when a post-translational or chemical modification IS the entity \
+  being discussed (e.g. "H3K27 acetylation", "AKT phosphorylation at Ser473", \
+  "K48-linked ubiquitination"). This is distinct from using "phosphorylates" as an \
+  interaction effect — use this type when the modification itself is the subject.
+- "structure": Use for subcellular organelles (mitochondria, nucleus, Golgi apparatus, \
+  endoplasmic reticulum, lysosome, centrosome) AND anatomical structures/tissues \
+  (retina, choroid, fascia, cortex, liver, hippocampus, stroma). Do NOT classify \
+  these as "cell_type" or "organ" — use "structure".
+- "pathogen": Use for disease-causing external organisms interacting with mammalian \
+  biology (e.g. SARS-CoV-2, Mycobacterium tuberculosis, Candida albicans, \
+  Plasmodium falciparum, influenza virus). Use when the organism is associated with \
+  infection or disease.
+- "symbiont": Use for non-pathogenic external organisms — commensal or mutualistic \
+  microorganisms (e.g. Lactobacillus reuteri, Bacteroides thetaiotaomicron, gut \
+  microbiome members described in a beneficial or neutral context). When ambiguous \
+  (e.g. E. coli as a model/lab strain), default to "pathogen".
+
 CRITICAL RULES:
 1. Only extract interactions that are EXPLICITLY stated or DIRECTLY measured in this paper's \
    text — not background knowledge the authors cite or assume.
@@ -68,7 +103,9 @@ EXTRACTION_TOOL = {
                             "enum": [
                                 "protein", "gene", "molecule", "metabolite",
                                 "rna", "pathway", "phenotype", "disease",
-                                "cell_type", "cell_line", "organism", "complex", "unknown"
+                                "cell_type", "cell_line", "organism", "complex",
+                                "modification", "structure", "pathogen", "symbiont",
+                                "unknown"
                             ]
                         },
                         "synonyms": {

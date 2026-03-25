@@ -316,9 +316,13 @@ def run_extraction_phase(
     query_linked_evidence = 0
     conflicts_reopened = 0
 
-    for paper_row in pending:
+    for i, paper_row in enumerate(pending):
         if _shutdown:
-            logger.info("Shutdown requested — stopping extraction early.")
+            remaining = len(pending) - i
+            logger.info(
+                f"Shutdown requested — stopping extraction early. "
+                f"{remaining} paper{'s' if remaining != 1 else ''} left to extract."
+            )
             break
 
         paper_id = paper_row["id"]

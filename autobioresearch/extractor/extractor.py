@@ -383,9 +383,7 @@ class PaperExtractor:
     # Extend this table as new variants appear in the logs.
     _ENTITY_TYPE_ALIASES: dict[str, str] = {
         "tissue_cell_type": "cell_type",
-        "tissue": "cell_type",
         "cell": "cell_type",
-        "organ": "cell_type",          # e.g. "lymph nodes" — closest valid type
         "peptide": "molecule",         # short peptides behave like small molecules
         "treatment": "unknown",
         "drug": "molecule",
@@ -397,6 +395,32 @@ class PaperExtractor:
         "mirna": "rna",
         "lncrna": "rna",
         "ncrna": "rna",
+        # Modifications
+        "post_translational_modification": "modification",
+        "ptm": "modification",
+        "phosphorylation": "modification",
+        "acetylation": "modification",
+        "methylation": "modification",
+        "ubiquitination": "modification",
+        "sumoylation": "modification",
+        "glycosylation": "modification",
+        # Structures / organelles / anatomical
+        "organelle": "structure",
+        "subcellular_structure": "structure",
+        "anatomical_structure": "structure",
+        "tissue": "structure",         # was "cell_type" — structure is more accurate
+        "organ": "structure",          # was "cell_type" — structure is more accurate
+        # Pathogens
+        "virus": "pathogen",
+        "bacteria": "pathogen",
+        "bacterium": "pathogen",
+        "fungus": "pathogen",
+        "parasite": "pathogen",
+        "microorganism": "pathogen",   # ambiguous — default to pathogen
+        # Symbionts / commensals
+        "commensal": "symbiont",
+        "microbiome": "symbiont",
+        "probiotic": "symbiont",
     }
 
     @classmethod

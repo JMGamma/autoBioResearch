@@ -26,7 +26,7 @@ db_path: "./autobioresearch.db"
 
 # --- Paper fetching ---
 crawler_threads: 4
-papers_per_query: 10
+papers_per_query: 5
 max_full_text_per_cycle: 20
 pubmed_requests_per_second: 3
 semantic_scholar_requests_per_second: 1

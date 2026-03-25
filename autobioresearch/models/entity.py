@@ -17,6 +17,10 @@ class EntityType(StrEnum):
     CELL_LINE = "cell_line"       # immortalised cell line (e.g. HEK293, HeLa, U87MG)
     ORGANISM = "organism"
     COMPLEX = "complex"           # macromolecular complex
+    MODIFICATION = "modification" # post-translational/chemical modifications (phosphorylation, acetylation, etc.)
+    STRUCTURE = "structure"       # organelles, anatomical structures, tissues (mitochondria, choroid, fascia)
+    PATHOGEN = "pathogen"         # disease-causing external organisms: viruses, bacteria, fungi, parasites
+    SYMBIONT = "symbiont"         # non-pathogenic external organisms: commensal microbiome, mutualistic bacteria
     UNKNOWN = "unknown"
 
 
