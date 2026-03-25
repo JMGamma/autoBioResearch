@@ -75,6 +75,10 @@ _XML_PARAM_RE = re.compile(
     r"<parameter=([^>]+)>(.*?)</parameter>",
     re.DOTALL | re.IGNORECASE,
 )
+_JSON_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 class LLMClient:
@@ -180,18 +184,18 @@ class LLMClient:
         if not self._reasoning_logger:
             # Reasoning logging disabled — still strip <think> tags so they don't
             # corrupt JSON parsing downstream.
-            content = getattr(message, "content", "") or ""
+            content = self._coerce_message_text(getattr(message, "content", ""))
             return _THINK_RE.sub("", content).strip()
 
         reasoning_parts: list[str] = []
 
         # Source 1: explicit reasoning_content field
-        rc = getattr(message, "reasoning_content", None)
+        rc = self._coerce_message_text(getattr(message, "reasoning_content", None))
         if rc:
             reasoning_parts.append(rc.strip())
 
         # Source 2: <think>…</think> blocks inside content
-        content = getattr(message, "content", "") or ""
+        content = self._coerce_message_text(getattr(message, "content", ""))
         for match in _THINK_RE.finditer(content):
             block = match.group(1).strip()
             if block:
@@ -210,6 +214,76 @@ class LLMClient:
 
         # Return content with <think> blocks removed
         return _THINK_RE.sub("", content).strip()
+
+    def _coerce_message_text(self, value: Any) -> str:
+        """Normalize provider-specific content payloads into plain text."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    text = (
+                        item.get("text")
+                        or item.get("content")
+                        or item.get("value")
+                        or item.get("arguments")
+                    )
+                    if text is not None:
+                        parts.append(self._coerce_message_text(text))
+                        continue
+                for attr in ("text", "content", "value", "arguments"):
+                    text = getattr(item, attr, None)
+                    if text is not None:
+                        parts.append(self._coerce_message_text(text))
+                        break
+            return "\n".join(part for part in parts if part).strip()
+        if isinstance(value, dict):
+            for key in ("text", "content", "value", "arguments"):
+                text = value.get(key)
+                if text is not None:
+                    return self._coerce_message_text(text)
+            try:
+                return json.dumps(value)
+            except TypeError:
+                return str(value)
+        for attr in ("text", "content", "value", "arguments"):
+            text = getattr(value, attr, None)
+            if text is not None:
+                return self._coerce_message_text(text)
+        return str(value)
+
+    def _extract_tool_call_arguments(self, message) -> Optional[str]:
+        """Support both tool_calls and legacy function_call formats."""
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            first = tool_calls[0]
+            function = getattr(first, "function", None)
+            if function is None and isinstance(first, dict):
+                function = first.get("function")
+            if function is not None:
+                arguments = getattr(function, "arguments", None)
+                if arguments is None and isinstance(function, dict):
+                    arguments = function.get("arguments")
+                if arguments:
+                    return self._coerce_message_text(arguments)
+
+        function_call = getattr(message, "function_call", None)
+        if function_call is None and isinstance(message, dict):
+            function_call = message.get("function_call")
+        if function_call is not None:
+            arguments = getattr(function_call, "arguments", None)
+            if arguments is None and isinstance(function_call, dict):
+                arguments = function_call.get("arguments")
+            if arguments:
+                return self._coerce_message_text(arguments)
+
+        return None
 
     def _call_openai_compatible(self, system: str, user: str, tool_function: dict) -> Optional[dict]:
         response = self._client.chat.completions.create(
@@ -249,19 +323,20 @@ class LLMClient:
         # Also check reasoning_content: some servers (Qwen/DeepSeek) move the entire
         # chain-of-thought (including the tool call) into a dedicated field, leaving
         # content empty.
-        raw_content = getattr(choice.message, "content", "") or ""
-        raw_reasoning = getattr(choice.message, "reasoning_content", "") or ""
+        raw_content = self._coerce_message_text(getattr(choice.message, "content", ""))
+        raw_reasoning = self._coerce_message_text(getattr(choice.message, "reasoning_content", ""))
         xml_result_pre = (
             self._parse_xml_tool_call(raw_content)
+            or self._parse_json_tool_call(raw_content)
             or self._parse_xml_tool_call(raw_reasoning)
+            or self._parse_json_tool_call(raw_reasoning)
         )
 
         # Capture/log reasoning and strip <think> tags from content.
         clean_content = self._capture_reasoning(choice.message, context=tool_name)
 
-        tool_calls = getattr(choice.message, "tool_calls", None)
-        if tool_calls:
-            raw = tool_calls[0].function.arguments
+        raw = self._extract_tool_call_arguments(choice.message)
+        if raw:
             try:
                 return json.loads(raw)
             except json.JSONDecodeError as e:
@@ -274,7 +349,7 @@ class LLMClient:
                 if repaired is not None:
                     logger.info(f"Recovered partial JSON from truncated tool call for '{tool_name}'")
                     return repaired
-                result = self._extract_json_fallback(clean_content)
+                result = self._extract_json_fallback(clean_content) or self._extract_json_fallback(raw_reasoning)
                 if result is None and finish_reason == "length":
                     raise LLMTruncatedError(
                         f"LLM response truncated for tool '{tool_name}' "
@@ -295,13 +370,18 @@ class LLMClient:
             logger.debug(f"Recovered tool call for '{tool_name}' via XML parser (clean content)")
             return xml_result_clean
 
+        json_tool_result = self._parse_json_tool_call(clean_content)
+        if json_tool_result is not None:
+            logger.debug(f"Recovered tool call for '{tool_name}' via JSON tool wrapper parser")
+            return json_tool_result
+
         logger.warning(
             f"No tool_calls in LLM response for '{tool_name}' "
             f"(finish_reason={finish_reason}). "
             f"Content after <think> strip (first 300 chars): "
             f"{clean_content[:300] if clean_content else '(empty)'}"
         )
-        result = self._extract_json_fallback(clean_content)
+        result = self._extract_json_fallback(clean_content) or self._extract_json_fallback(raw_reasoning)
         if result is None and finish_reason == "length":
             raise LLMTruncatedError(
                 f"LLM response truncated for tool '{tool_name}' "
@@ -399,6 +479,43 @@ class LLMClient:
         logger.debug(f"Parsed XML-style tool call with params: {list(result.keys())}")
         return result
 
+    def _parse_json_tool_call(self, content: str) -> Optional[dict]:
+        """Parse <tool_call>{...}</tool_call> wrappers used by some local models."""
+        if not content:
+            return None
+
+        match = _JSON_TOOL_CALL_RE.search(content)
+        if not match:
+            return None
+
+        payload = match.group(1).strip()
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            repaired = self._repair_truncated_json(payload)
+            if repaired is None:
+                return None
+            parsed = repaired
+
+        if not isinstance(parsed, dict):
+            return None
+
+        arguments = parsed.get("arguments")
+        if isinstance(arguments, dict):
+            return arguments
+        if isinstance(arguments, str):
+            try:
+                decoded = json.loads(arguments)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(decoded, dict):
+                return decoded
+
+        # Some providers may put the tool payload directly at top level.
+        if "entities" in parsed or "interactions" in parsed:
+            return parsed
+        return None
+
     def _extract_json_fallback(self, content: str) -> Optional[dict]:
         """Try to extract a JSON object from raw LLM content as a last resort."""
         if not content:
@@ -445,7 +562,11 @@ class LLMClient:
                 if not choice:
                     return None
                 # Strip <think> blocks (and log them if enabled)
-                return self._capture_reasoning(choice.message, context="simple_completion") or None
+                content = self._capture_reasoning(choice.message, context="simple_completion")
+                if content:
+                    return content
+                reasoning_only = self._coerce_message_text(getattr(choice.message, "reasoning_content", ""))
+                return reasoning_only or None
         except Exception as e:
             logger.error(f"LLM simple_completion failed: {e}")
             return None
