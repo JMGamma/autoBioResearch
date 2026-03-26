@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/* ─── PALETTE ──────────────────────────────────────────────────────────────
+   Swap these 4 values to change the entire theme.
+   p1 = darkest background · p2 = surface/panel · p3 = accent · p4 = text
+   ─────────────────────────────────────────────────────────────────────────
+   Current: https://colorhunt.co/palette/22283131363f76abaeeeeeee
+   Previous options:
+     forest/sage  #4d5849 · #778873 · #a1bc98 · #f1f3e0
+     slate/cream  #30364f · #31363f · #76abae · #f0f0db
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --p1: #222831;   /* darkest — main page background           */
+  --p2: #31363f;   /* surface  — panels, nav, cards            */
+  --p3: #76abae;   /* accent   — highlights, icons, sage tones */
+  --p4: #eeeeee;   /* lightest — primary text                  */
+}
+
+/* ─── SEMANTIC TOKENS ──────────────────────────────────────────────────────
+   These map the 4 palette values to named roles used throughout components.
+   Derived shades use color-mix() — no manual hex math needed.
+   ────────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Text hierarchy */
+  --color-snow:         var(--p4);                                          /* primary text          */
+  --color-mist:         color-mix(in srgb, var(--p4) 65%, var(--p3));      /* secondary text        */
+  --color-sage:         var(--p3);                                          /* muted/accent text     */
+  --color-sage-dark:    color-mix(in srgb, var(--p3) 65%, var(--p2));      /* hover/active accent   */
+  --color-snow-dim:     color-mix(in srgb, var(--p4) 45%, var(--p2));      /* disabled/dimmed text  */
+
+  /* Surfaces */
+  --color-forest-dark:  var(--p1);                                          /* page background       */
+  --color-forest:       var(--p2);                                          /* nav, panel bg         */
+  --color-forest-mid:   color-mix(in srgb, var(--p1) 35%, var(--p2));      /* card / raised surface */
+  --color-forest-light: color-mix(in srgb, var(--p2) 55%, var(--p3));      /* borders, dividers     */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--p1);
+  color: var(--p4);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+input[type="range"] {
+  accent-color: var(--p3);
+}
