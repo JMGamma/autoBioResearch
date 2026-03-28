@@ -89,30 +89,85 @@ export interface PerturbationRequest {
   depth: number
 }
 
+export interface ContributingInteraction {
+  interaction_id: string
+  from_entity: string
+  effect: string | null
+  sign: number  // +1 activating, -1 inhibitory
+  confidence_score: number
+}
+
 export interface AffectedEntity {
   entity_id: string
   name: string
   perturbation_score: number
-  contributing_paths: string[][]
-  min_hop_depth: number
+  hop_depth: number
+  contributing_interactions: ContributingInteraction[]
 }
 
 export interface PerturbationResponse {
+  schema_version: string
   query: {
     entity: string
     entity_id: string
     entity_resolved: string
     mode: 'promote' | 'suppress'
     depth: number
+    cache_hit: boolean
   }
-  seed: { id: string; name: string }
+  seed: { entity_id: string; name: string; perturbation_score: number }
   affected: AffectedEntity[]
-  excluded_edges: Array<{ id: string; reason: string }>
+  excluded_edges: Array<{
+    interaction_id: string
+    entity_a: string
+    entity_b: string
+    effect: string | null
+    reason: string
+  }>
   stats: {
     n_affected: number
     n_excluded_edges: number
     duration_ms: number
   }
+}
+
+// ─── Paths ────────────────────────────────────────────────────────────────────
+export interface PathNode {
+  id: string
+  display_name: string
+  entity_type: string
+}
+
+export interface PathEdge {
+  id: string
+  source: string
+  target: string
+  effect: string | null
+  confidence_score: number
+  direction: string
+}
+
+export interface PathResult {
+  nodes: PathNode[]
+  edges: PathEdge[]
+  score: number
+  hop_count: number
+  net_sign: number // +1 activating, -1 inhibitory, 0 mixed/unknown
+}
+
+export interface PathsRequest {
+  source_entity: string
+  target_entity: string
+  max_hops: number
+  min_confidence: number
+  max_paths: number
+}
+
+export interface PathsResponse {
+  source: { id: string; display_name: string }
+  target: { id: string; display_name: string }
+  paths: PathResult[]
+  stats: { paths_found: number; max_hops_searched: number; duration_ms: number }
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────

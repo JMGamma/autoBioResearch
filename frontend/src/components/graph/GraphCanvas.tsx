@@ -16,6 +16,7 @@ interface Props {
   layout?: 'fcose' | 'dagre'
   showUnknown?: boolean
   perturbationScores: Map<string, number> | null
+  selectedPath: { nodeIds: string[]; edgeIds: string[] } | null
   onEdgeClick: (edgeId: string) => void
   onNodeClick: (nodeId: string) => void
 }
@@ -27,6 +28,7 @@ export function GraphCanvas({
   layout = 'fcose',
   showUnknown = false,
   perturbationScores,
+  selectedPath,
   onEdgeClick,
   onNodeClick,
 }: Props) {
@@ -91,6 +93,24 @@ export function GraphCanvas({
       cy.$id(nodeId).data('perturbation_score', score)
     })
   }, [perturbationScores])
+
+  // Path highlight: dim non-path elements, brighten path elements — no re-layout
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.elements().removeClass('path-highlight path-dim')
+    if (!selectedPath) return
+    const pathNodeSet = new Set(selectedPath.nodeIds)
+    const pathEdgeSet = new Set(selectedPath.edgeIds)
+    cy.nodes().forEach(n => {
+      if (pathNodeSet.has(n.id())) n.addClass('path-highlight')
+      else n.addClass('path-dim')
+    })
+    cy.edges().forEach(e => {
+      if (pathEdgeSet.has(e.id())) e.addClass('path-highlight')
+      else e.addClass('path-dim')
+    })
+  }, [selectedPath])
 
   return (
     <div className="relative w-full h-full bg-forest-dark">

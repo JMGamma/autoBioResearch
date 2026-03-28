@@ -333,6 +333,49 @@ class EntityRepo:
         ).mappings().all()
         return [dict(r) for r in rows]
 
+    def search_entities(
+        self,
+        q: str,
+        entity_type: Optional[str] = None,
+        organism: Optional[str] = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """
+        Prefix search over entity_synonyms for typeahead/search pages.
+
+        Returns entities whose synonyms start with q (case-insensitive), ranked
+        by exact match first, then paper_count DESC.  DISTINCT on entity_id so
+        multiple matching synonyms don't produce duplicate rows.
+        """
+        q_lower = q.lower().strip()
+        sql = text("""
+            SELECT
+                e.id,
+                e.display_name,
+                e.canonical_name,
+                e.entity_type,
+                e.organism,
+                e.paper_count,
+                es.synonym AS matching_synonym,
+                CASE WHEN es.synonym = :exact THEN 0 ELSE 1 END AS rank_order
+            FROM entity_synonyms es
+            JOIN entities e ON e.id = es.entity_id
+            WHERE es.synonym LIKE :prefix
+              AND (:entity_type IS NULL OR e.entity_type = :entity_type)
+              AND (:organism_lower IS NULL OR LOWER(COALESCE(e.organism, '')) = :organism_lower)
+            GROUP BY e.id
+            ORDER BY rank_order ASC, e.paper_count DESC
+            LIMIT :limit
+        """)
+        rows = self.conn.execute(sql, {
+            "exact": q_lower,
+            "prefix": q_lower + "%",
+            "entity_type": entity_type,
+            "organism_lower": organism.lower().strip() if organism else None,
+            "limit": min(limit, 50),
+        }).mappings().all()
+        return [dict(r) for r in rows]
+
     def count(self) -> int:
         return self.conn.execute(select(func.count()).select_from(db.entities)).scalar_one()
 
@@ -598,6 +641,8 @@ class EvidenceRepo:
                 db.evidence,
                 db.papers.c.year.label("paper_year"),
                 db.papers.c.title.label("paper_title"),
+                db.papers.c.doi.label("paper_doi"),
+                db.papers.c.journal.label("paper_journal"),
             )
             .join(db.papers, db.papers.c.id == db.evidence.c.paper_id)
             .where(db.evidence.c.interaction_id == interaction_id)

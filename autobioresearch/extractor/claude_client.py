@@ -30,6 +30,20 @@ class LLMTruncatedError(Exception):
     and all JSON recovery strategies have failed. Callers may retry with the same input."""
 
 
+class LLMTimeoutError(Exception):
+    """Raised when an LLM API call times out. Callers may retry once with the same input."""
+
+
+def _is_timeout_exception(exc: Exception) -> bool:
+    """Return True if *exc* looks like a network/SDK timeout, without hard-importing either SDK."""
+    return type(exc).__name__ in (
+        "APITimeoutError",   # anthropic + openai SDKs
+        "TimeoutException",  # httpx base class
+        "ReadTimeout",       # httpx / requests
+        "ConnectTimeout",    # httpx / requests
+    )
+
+
 # Module-level reasoning logger — configured lazily on first LLMClient instantiation.
 _reasoning_logger: Optional[logging.Logger] = None
 
@@ -144,6 +158,9 @@ class LLMClient:
             except LLMTruncatedError:
                 raise  # truncation retries are handled by the caller (extractor); don't loop here
             except Exception as e:
+                if _is_timeout_exception(e):
+                    logger.warning(f"LLM call timed out: {e}")
+                    raise LLMTimeoutError(str(e)) from e  # let extractor handle 1 retry + review log
                 if attempt < self._config.llm_max_retries:
                     wait = self._config.llm_retry_backoff_seconds * (2 ** attempt)
                     logger.warning(f"LLM call failed (attempt {attempt+1}): {e}. Retrying in {wait}s...")

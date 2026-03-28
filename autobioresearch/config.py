@@ -67,6 +67,11 @@ class AppConfig(BaseSettings):
     entity_resolution_requests_per_second: float = 3.0
     entity_resolution_timeout: int = 10
 
+    # --- API server ---
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    cache_db_path: str = "./explorer_cache.db"
+
     # --- Perturbation ---
     perturbation_combination_exponent: float = 0.55  # α in: 1 - ∏(1 - |xᵢ|^α) multi-path score combination
 
@@ -112,10 +117,18 @@ class AppConfig(BaseSettings):
 
     @classmethod
     def from_yaml(cls, path: str = "config.yaml") -> "AppConfig":
+        # Search for config.yaml relative to CWD first, then relative to project root
+        # (the directory containing this package), so the server can be launched
+        # from any working directory and always find the right config + database.
         yaml_path = Path(path)
+        if not yaml_path.exists():
+            yaml_path = Path(__file__).parent.parent / path
         data: dict = {}
         if yaml_path.exists():
             with open(yaml_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+            # Resolve db_path relative to the config file, not CWD
+            if "db_path" in data:
+                data["db_path"] = str((yaml_path.parent / data["db_path"]).resolve())
         # env vars and .env take precedence over yaml (handled by pydantic-settings)
         return cls(**data)

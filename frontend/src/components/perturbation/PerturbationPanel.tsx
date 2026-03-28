@@ -5,19 +5,55 @@ import { usePerturbation } from '../../hooks/usePerturbation'
 import { Spinner } from '../ui/Spinner'
 import { ErrorBanner } from '../ui/ErrorBanner'
 
-function ScoreRow({ entity, onClick }: { entity: AffectedEntity; onClick: () => void }) {
+function ScoreRow({ entity, onNavigate }: { entity: AffectedEntity; onNavigate: () => void }) {
+  const [expanded, setExpanded] = useState(false)
   const score = entity.perturbation_score
+  const hasTrail = entity.contributing_interactions.length > 0
+
   return (
-    <button onClick={onClick}
-      className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-forest transition-colors">
-      <div className="min-w-0">
-        <span className="text-sm text-snow truncate block">{entity.name}</span>
-        <span className="text-xs text-sage">depth {entity.min_hop_depth}</span>
+    <div className="rounded-lg border border-transparent hover:border-forest-light transition-colors">
+      <div className="flex items-center gap-1">
+        <button
+          onClick={onNavigate}
+          className="flex-1 text-left flex items-center justify-between gap-2 px-2 py-1.5"
+        >
+          <div className="min-w-0">
+            <span className="text-sm text-snow truncate block">{entity.name}</span>
+            <span className="text-xs text-sage">depth {entity.hop_depth}</span>
+          </div>
+          <span className={`text-sm font-bold flex-shrink-0 ${score > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {score > 0 ? '+' : ''}{score.toFixed(3)}
+          </span>
+        </button>
+        {hasTrail && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="px-1.5 py-1.5 text-sage hover:text-snow transition-colors flex-shrink-0"
+            title="Show explanation trail"
+          >
+            <svg className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        )}
       </div>
-      <span className={`text-sm font-bold flex-shrink-0 ${score > 0 ? 'text-green-400' : 'text-red-400'}`}>
-        {score > 0 ? '+' : ''}{score.toFixed(3)}
-      </span>
-    </button>
+      {expanded && hasTrail && (
+        <div className="px-2 pb-2 space-y-1">
+          {entity.contributing_interactions.map((ci, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-xs text-sage/80 pl-1 border-l border-forest-light">
+              <span className={`font-mono flex-shrink-0 ${ci.sign > 0 ? 'text-green-400/80' : 'text-red-400/80'}`}>
+                {ci.sign > 0 ? '▲' : '▼'}
+              </span>
+              <span className="truncate">{ci.from_entity}</span>
+              <span className="text-sage/50 flex-shrink-0">→</span>
+              <span className="truncate italic">{ci.effect ?? 'unknown'}</span>
+              <span className="text-sage/50 flex-shrink-0 ml-auto">{(ci.confidence_score * 100).toFixed(0)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -71,7 +107,7 @@ export function PerturbationPanel({ seedName, onScoresChange }: {
         <label className="text-xs text-sage mb-1 block">
           Depth: <span className="text-mist font-medium">{depth} hops</span>
         </label>
-        <input type="range" min={1} max={5} step={1} value={depth}
+        <input type="range" min={1} max={4} step={1} value={depth}
           onChange={e => handleDepthChange(parseInt(e.target.value))} className="w-full" />
       </div>
 
@@ -97,7 +133,7 @@ export function PerturbationPanel({ seedName, onScoresChange }: {
             Predicted response ({data.stats.n_affected} affected):
           </p>
           {topAffected.map(a => (
-            <ScoreRow key={a.entity_id} entity={a} onClick={() => navigate(`/entity/${a.entity_id}`)} />
+            <ScoreRow key={a.entity_id} entity={a} onNavigate={() => navigate(`/entity/${a.entity_id}`)} />
           ))}
           {data.stats.n_excluded_edges > 0 && (
             <p className="text-xs text-sage/60 pt-1">

@@ -24,6 +24,13 @@ export const EFFECT_EDGE_COLORS: Record<string, string> = {
 }
 
 function nodeColor(ele: Cytoscape.NodeSingular): string {
+  const score = ele.data('perturbation_score') as number | undefined | null
+  if (score !== undefined && score !== null) {
+    const intensity = Math.min(0.25 + Math.abs(score) * 0.75, 1.0)
+    if (score > 0.01)  return `rgba(74, 222, 128, ${intensity.toFixed(2)})`  // green-400
+    if (score < -0.01) return `rgba(248, 113, 113, ${intensity.toFixed(2)})` // red-400
+    return '#6b7280' // gray-500 for near-zero
+  }
   const t = (ele.data('entity_type') as string | undefined)?.toLowerCase() ?? ''
   return ENTITY_TYPE_COLORS[t] ?? ENTITY_TYPE_COLORS.default
 }
@@ -115,6 +122,23 @@ export const stylesheet: any[] = [
       'width': 4,
       'opacity': 1,
       'label': 'data(label)',
+    },
+  },
+  // ── Path highlight / dim ────────────────────────────────────────────────────
+  {
+    selector: '.path-highlight',
+    style: {
+      'border-color': '#ffffff',
+      'border-width': 4,
+      'opacity': 1,
+      'line-color': '#ffffff',
+      'target-arrow-color': '#ffffff',
+    },
+  },
+  {
+    selector: '.path-dim',
+    style: {
+      'opacity': 0.15,
     },
   },
 ]

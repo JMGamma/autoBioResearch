@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from autobioresearch.config import AppConfig
-from autobioresearch.extractor.claude_client import LLMClient, LLMTruncatedError
+from autobioresearch.extractor.claude_client import LLMClient, LLMTruncatedError, LLMTimeoutError
 from autobioresearch.extractor.evidence_normalizer import EvidenceNormalizer
 from autobioresearch.extractor.extraction_prompts import (
     EXTRACTION_FUNCTION,
@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 _truncation_review_logger = logging.getLogger("autobioresearch.truncation_review")
 
 
+_REVIEW_ACTIONS: dict[str, str] = {
+    "truncation": "verify paper is extractable or raise llm_max_tokens",
+    "timeout": "verify API connectivity or raise llm_timeout_seconds",
+}
+
+
 def _log_truncation_review(
     paper_id: str,
     title: str,
@@ -46,6 +52,8 @@ def _log_truncation_review(
     chunk_end: int,
     max_tokens: int,
     attempts: int,
+    *,
+    reason: str = "truncation",
 ) -> None:
     """Write a structured entry to the truncation review log for human triage."""
     if paper_id.startswith("pmid:"):
@@ -55,6 +63,7 @@ def _log_truncation_review(
     else:
         paper_url = "n/a"
     title_short = (title or "")[:120] + ("…" if len(title or "") > 120 else "")
+    action = _REVIEW_ACTIONS.get(reason, _REVIEW_ACTIONS["truncation"])
     _truncation_review_logger.warning(
         "\n"
         f"  paper_id    : {paper_id}\n"
@@ -63,7 +72,8 @@ def _log_truncation_review(
         f"  chunk       : {chunk_start}–{chunk_end} chars\n"
         f"  max_tokens  : {max_tokens}\n"
         f"  attempts    : {attempts}\n"
-        f"  action      : flagged for human review — verify paper is extractable or raise llm_max_tokens"
+        f"  reason      : {reason}\n"
+        f"  action      : flagged for human review — {action}"
     )
 
 
@@ -149,20 +159,23 @@ class PaperExtractor:
                         tool_function=EXTRACTION_FUNCTION,
                     )
                     break
-                except LLMTruncatedError:
+                except (LLMTruncatedError, LLMTimeoutError) as exc:
+                    reason = "timeout" if isinstance(exc, LLMTimeoutError) else "truncation"
+                    label = reason.capitalize()
                     if attempt < max_attempts - 1:
                         logger.warning(
-                            f"Truncation on attempt {attempt + 1}/{max_attempts} for "
+                            f"{label} on attempt {attempt + 1}/{max_attempts} for "
                             f"{paper_id} chunk @{chunk_start} — retrying"
                         )
                     else:
                         logger.warning(
-                            f"Truncation on all {max_attempts} attempt(s) for "
+                            f"{label} on all {max_attempts} attempt(s) for "
                             f"{paper_id} chunk @{chunk_start} — flagged for review"
                         )
                         _log_truncation_review(
                             paper_id, title, chunk_start, chunk_end,
                             self._config.llm_max_tokens, max_attempts,
+                            reason=reason,
                         )
 
             if not raw:

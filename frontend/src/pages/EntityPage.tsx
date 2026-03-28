@@ -8,12 +8,13 @@ import { GraphControls } from '../components/graph/GraphControls'
 import { GraphLegend } from '../components/graph/GraphLegend'
 import { EvidenceDrawer } from '../components/evidence/EvidenceDrawer'
 import { PerturbationPanel } from '../components/perturbation/PerturbationPanel'
+import { PathExplorer } from '../components/paths/PathExplorer'
 import { Spinner } from '../components/ui/Spinner'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
 import { SearchBar } from '../components/search/SearchBar'
 import { SearchResults } from '../components/search/SearchResults'
 import { useEntitySearch } from '../hooks/useEntitySearch'
-import type { SubgraphRequest } from '../types/api'
+import type { SubgraphRequest, PathResult } from '../types/api'
 
 function useDebounce(value: string, delay: number) {
   const [debounced, setDebounced] = useState(value)
@@ -35,6 +36,8 @@ export function EntityPage() {
   const [showUnknown, setShowUnknown] = useState(false)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [perturbationScores, setPerturbationScores] = useState<Map<string, number> | null>(null)
+  const [selectedPath, setSelectedPath] = useState<PathResult | null>(null)
+  const [leftTab, setLeftTab] = useState<'perturbation' | 'paths'>('perturbation')
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -138,10 +141,35 @@ export function EntityPage() {
             onShowUnknownChange={setShowUnknown}
             isLoading={graphLoading}
           />
-          <PerturbationPanel
-            seedName={entity.display_name}
-            onScoresChange={setPerturbationScores}
-          />
+          {/* Tab strip */}
+          <div className="flex border border-forest-light rounded-lg overflow-hidden text-xs">
+            {(['perturbation', 'paths'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setLeftTab(tab)}
+                className={`flex-1 py-2 capitalize transition-colors ${
+                  leftTab === tab
+                    ? 'bg-forest-mid text-snow'
+                    : 'bg-transparent text-sage hover:text-snow'
+                }`}
+              >
+                {tab === 'perturbation' ? 'Perturbation' : 'Find Path'}
+              </button>
+            ))}
+          </div>
+
+          {leftTab === 'perturbation' && (
+            <PerturbationPanel
+              seedName={entity.display_name}
+              onScoresChange={scores => { setPerturbationScores(scores); setSelectedPath(null) }}
+            />
+          )}
+          {leftTab === 'paths' && (
+            <PathExplorer
+              sourceEntityName={entity.display_name}
+              onPathSelected={path => { setSelectedPath(path); setPerturbationScores(null) }}
+            />
+          )}
         </div>
 
         {/* Graph canvas */}
@@ -158,6 +186,7 @@ export function EntityPage() {
             layout={layout}
             showUnknown={showUnknown}
             perturbationScores={perturbationScores}
+            selectedPath={selectedPath ? { nodeIds: selectedPath.nodes.map(n => n.id), edgeIds: selectedPath.edges.map(e => e.id) } : null}
             onEdgeClick={setSelectedEdgeId}
             onNodeClick={nodeId => { if (nodeId !== id) navigate(`/entity/${nodeId}`) }}
           />
