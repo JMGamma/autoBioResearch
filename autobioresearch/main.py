@@ -139,7 +139,7 @@ def _seed_initial_queries(repos: Repositories, config: AppConfig) -> int:
 def _fetch_papers_for_query(
     query_row: dict,
     pubmed: PubMedCrawler,
-    s2: SemanticScholarCrawler,
+    s2: Optional[SemanticScholarCrawler],
 ) -> tuple[bool, list]:
     """Fetch papers for a single query. Thread-safe (no DB writes)."""
     q_text = query_row["query_text"]
@@ -150,6 +150,9 @@ def _fetch_papers_for_query(
         if api == "pubmed":
             return True, pubmed.search(q_text, max_results=max_results)
         elif api == "semantic_scholar":
+            if s2 is None:
+                logger.debug(f"Semantic Scholar disabled; routing query to PubMed: {q_text!r}")
+                return True, pubmed.search(q_text, max_results=max_results)
             return True, s2.search(q_text, max_results=max_results)
         else:
             logger.warning(f"Unknown source_api: {api}, defaulting to pubmed")
@@ -194,7 +197,7 @@ def _fetch_single_query(
     config: AppConfig,
     query_row: dict,
     pubmed: PubMedCrawler,
-    s2: SemanticScholarCrawler,
+    s2: Optional[SemanticScholarCrawler],
 ) -> dict:
     """Fetch papers for one query, persist them, and update query status."""
     q = dict(query_row)
@@ -232,7 +235,7 @@ def run_fetch_phase(
     repos: Repositories,
     config: AppConfig,
     pubmed: PubMedCrawler,
-    s2: SemanticScholarCrawler,
+    s2: Optional[SemanticScholarCrawler],
 ) -> dict:
     """Fetch papers for pending queries. Returns fetch telemetry for the cycle."""
     pending = repos.queries.get_pending(config.queries_per_cycle)
@@ -440,7 +443,7 @@ def run_interleaved_fetch_extraction_phase(
     repos: Repositories,
     config: AppConfig,
     pubmed: PubMedCrawler,
-    s2: SemanticScholarCrawler,
+    s2: Optional[SemanticScholarCrawler],
     extractor: PaperExtractor,
     pmc_fetcher: PMCFullTextFetcher,
     conn,
@@ -586,7 +589,7 @@ def run_cycle(
     config: AppConfig,
     engine,
     pubmed: PubMedCrawler,
-    s2: SemanticScholarCrawler,
+    s2: Optional[SemanticScholarCrawler],
     pmc_fetcher: PMCFullTextFetcher,
     extractor: PaperExtractor,
     conflict_detector=None,
@@ -739,10 +742,15 @@ def main():
         requests_per_second=config.pubmed_requests_per_second,
         ncbi_api_key=config.ncbi_api_key,
     )
-    s2 = SemanticScholarCrawler(
-        requests_per_second=config.semantic_scholar_requests_per_second,
-        semantic_scholar_api_key=config.semantic_scholar_api_key,
-    )
+    s2: Optional[SemanticScholarCrawler] = None
+    if config.semantic_scholar_enabled:
+        s2 = SemanticScholarCrawler(
+            requests_per_second=config.semantic_scholar_requests_per_second,
+            semantic_scholar_api_key=config.semantic_scholar_api_key,
+            contact_email=config.contact_email,
+        )
+    else:
+        logger.info("Semantic Scholar disabled (semantic_scholar_enabled=false); S2 queries will route to PubMed")
     pmc_fetcher = PMCFullTextFetcher(ncbi_api_key=config.ncbi_api_key)
     llm = LLMClient(config)
 

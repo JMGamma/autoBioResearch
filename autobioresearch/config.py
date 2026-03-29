@@ -43,8 +43,10 @@ class AppConfig(BaseSettings):
     max_full_text_per_cycle: int = 20
     pubmed_requests_per_second: float = 3.0
     semantic_scholar_requests_per_second: float = 1.0
+    semantic_scholar_enabled: bool = True
     ncbi_api_key: Optional[str] = Field(default=None, alias="NCBI_API_KEY")
     semantic_scholar_api_key: Optional[str] = Field(default=None, alias="SEMANTIC_SCHOLAR_API_KEY")
+    contact_email: Optional[str] = Field(default=None, alias="CONTACT_EMAIL")
 
     # --- Extraction ---
     max_chunk_chars: int = 6000

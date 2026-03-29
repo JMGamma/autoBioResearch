@@ -27,12 +27,16 @@ class SemanticScholarCrawler(BaseCrawler):
         self,
         requests_per_second: float = 1.0,
         semantic_scholar_api_key: Optional[str] = None,
+        contact_email: Optional[str] = None,
         timeout: int = 30,
     ):
         self._limiter = RateLimiter(requests_per_second)
         self._timeout = timeout
         self._session = requests.Session()
-        self._session.headers["User-Agent"] = "AutoBioResearch/0.1"
+        ua = "AutoBioResearch/0.1"
+        if contact_email:
+            ua += f" (mailto:{contact_email})"
+        self._session.headers["User-Agent"] = ua
         if semantic_scholar_api_key:
             self._session.headers["x-api-key"] = semantic_scholar_api_key
 
@@ -54,7 +58,8 @@ class SemanticScholarCrawler(BaseCrawler):
                     f"Waiting {wait:.1f}s before retry... "
                     f"headers={{Retry-After={resp.headers.get('Retry-After')}, "
                     f"X-RateLimit-Remaining={resp.headers.get('X-RateLimit-Remaining')}, "
-                    f"X-RateLimit-Reset={resp.headers.get('X-RateLimit-Reset')}}}"
+                    f"X-RateLimit-Reset={resp.headers.get('X-RateLimit-Reset')}}} "
+                    f"body={resp.text[:500]!r}"
                 )
                 time.sleep(wait)
                 continue
