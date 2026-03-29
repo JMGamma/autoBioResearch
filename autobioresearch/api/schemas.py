@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EntitySearchResult(BaseModel):
@@ -54,10 +54,10 @@ class EdgeView(BaseModel):
 
 class SubgraphRequest(BaseModel):
     entity_ids: list[str]
-    hops: int = 1
-    edge_limit: int = 50
+    hops: int = Field(default=1, ge=1, le=3)
+    edge_limit: int = Field(default=50, ge=1, le=200)
     entity_type_filter: Optional[list[str]] = None
-    min_confidence_score: float = 0.0
+    min_confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class SubgraphResponse(BaseModel):
@@ -69,7 +69,7 @@ class SubgraphResponse(BaseModel):
 class PerturbationRequest(BaseModel):
     entity: str
     mode: str = "suppress"  # "suppress" | "promote"
-    depth: int = 3
+    depth: int = Field(default=3, ge=1, le=4)
 
 
 class PerturbationResponse(BaseModel):
@@ -139,9 +139,9 @@ class PathResult(BaseModel):
 class PathsRequest(BaseModel):
     source_entity: str
     target_entity: str
-    max_hops: int = 4
-    min_confidence: float = 0.3
-    max_paths: int = 20
+    max_hops: int = Field(default=4, ge=1, le=5)
+    min_confidence: float = Field(default=0.3, ge=0.0, le=1.0)
+    max_paths: int = Field(default=20, ge=1, le=50)
 
 
 class PathsResponse(BaseModel):

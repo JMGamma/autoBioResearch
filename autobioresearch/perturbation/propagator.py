@@ -28,6 +28,17 @@ from sqlalchemy import text
 
 from autobioresearch.perturbation.sign_map import effect_to_sign
 
+# Combination exponent α used in the multi-path score formula:
+#   combined = 1 - ∏(1 - min(|xᵢ|, 1)^α)
+#
+# α controls how quickly redundant paths saturate the combined score:
+#   α → 1.0  linear combination — each additional path contributes nearly its full weight
+#   α → 0.0  rapid saturation — the first strong path dominates; extra paths add little
+#
+# 0.55 was chosen empirically to give sub-linear but not extreme diminishing returns:
+# two equally-weighted paths of 0.5 combine to ~0.69 (vs 0.75 at α=1, 0.5 at α→0).
+# Raise toward 1.0 if you want more additive multi-path reinforcement; lower toward
+# 0.3 if you want a single dominant path to suppress noisy secondary routes.
 _DEFAULT_COMBINATION_EXPONENT: float = 0.55  # fallback when config is unavailable
 
 _OUTGOING_EDGES_SQL = text("""

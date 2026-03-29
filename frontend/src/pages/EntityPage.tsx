@@ -66,6 +66,8 @@ export function EntityPage() {
   const nodes = subgraph?.nodes ?? []
   const edges = subgraph?.edges ?? []
 
+  if (!id) { navigate('/'); return null }
+
   if (entityLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-forest-dark">
@@ -117,8 +119,11 @@ export function EntityPage() {
             />
           )}
         </div>
-        <div className="text-xs text-sage flex-shrink-0">
+        <div className="text-xs text-sage flex-shrink-0 flex items-center gap-2">
           {subgraph && `${nodes.length} nodes · ${edges.length} edges`}
+          {subgraph?.stats.truncated && (
+            <span className="text-amber-400">· results limited to {edges.length} edges</span>
+          )}
         </div>
       </header>
 
@@ -182,7 +187,7 @@ export function EntityPage() {
           <GraphCanvas
             nodes={nodes}
             edges={edges}
-            seedEntityId={id!}
+            seedEntityId={id}
             layout={layout}
             showUnknown={showUnknown}
             perturbationScores={perturbationScores}

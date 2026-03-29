@@ -4,8 +4,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   })
   if (!res.ok) {
+    if (res.status === 429) throw new Error('Too many requests — please wait a moment and try again.')
     const body = await res.json().catch(() => ({}))
-    throw new Error((body as { detail?: string }).detail ?? `HTTP ${res.status}`)
+    const detail = (body as { detail?: string }).detail
+    throw new Error(detail ?? `${res.status} ${res.statusText}`)
   }
   return res.json() as Promise<T>
 }

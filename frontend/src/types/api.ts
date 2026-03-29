@@ -57,6 +57,7 @@ export interface SubgraphResponse {
     n_nodes: number
     n_edges: number
     max_hops_reached: number
+    truncated: boolean
   }
 }
 

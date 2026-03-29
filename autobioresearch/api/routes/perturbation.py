@@ -38,13 +38,18 @@ def run_perturbation(
 ):
     if body.mode not in ("suppress", "promote"):
         raise HTTPException(status_code=422, detail="mode must be 'suppress' or 'promote'")
-    if body.depth < 1 or body.depth > 4:
-        raise HTTPException(status_code=400, detail="depth must be between 1 and 4")
 
     repo = EntityRepo(conn)
-    entity_id = repo.find_by_synonym(body.entity)
-    if not entity_id:
+    candidates = repo.find_by_synonym_candidates(body.entity)
+    entity_ids = {c["entity_id"] for c in candidates}
+    if not entity_ids:
         raise HTTPException(status_code=404, detail=f"Entity not found: {body.entity!r}")
+    if len(entity_ids) > 1:
+        raise HTTPException(status_code=409, detail={
+            "message": f"Ambiguous entity name: {body.entity!r}",
+            "candidates": [{"id": c["entity_id"], "canonical_name": c["canonical_name"], "entity_type": c["entity_type"], "organism": c["organism"]} for c in candidates],
+        })
+    entity_id = next(iter(entity_ids))
 
     entity = repo.get_by_id(entity_id)
     seed_name = entity["canonical_name"] if entity else body.entity

@@ -40,8 +40,8 @@ function ScoreRow({ entity, onNavigate }: { entity: AffectedEntity; onNavigate: 
       </div>
       {expanded && hasTrail && (
         <div className="px-2 pb-2 space-y-1">
-          {entity.contributing_interactions.map((ci, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-xs text-sage/80 pl-1 border-l border-forest-light">
+          {entity.contributing_interactions.map((ci) => (
+            <div key={ci.interaction_id} className="flex items-center gap-1.5 text-xs text-sage/80 pl-1 border-l border-forest-light">
               <span className={`font-mono flex-shrink-0 ${ci.sign > 0 ? 'text-green-400/80' : 'text-red-400/80'}`}>
                 {ci.sign > 0 ? '▲' : '▼'}
               </span>

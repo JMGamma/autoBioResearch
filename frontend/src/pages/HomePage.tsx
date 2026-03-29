@@ -24,7 +24,7 @@ export function HomePage() {
   const debouncedQuery = useDebounce(query, 250)
 
   const { data: results, isLoading, error: searchError } = useEntitySearch(debouncedQuery)
-  const { data: stats } = useStats()
+  const { data: stats, error: statsError } = useStats()
 
   function handleSelect(r: EntitySearchResult) {
     setOpen(false)
@@ -74,7 +74,7 @@ export function HomePage() {
         </div>
 
         {/* Stats */}
-        <StatsBar stats={stats} />
+        <StatsBar stats={stats} error={statsError} />
 
         <p className="text-center text-xs text-sage">
           Search for genes, proteins, pathways, or diseases to explore their interaction neighborhood

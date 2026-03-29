@@ -140,8 +140,10 @@ class PerturbationCache:
                     (id, entity_id, mode, max_depth, result_json, created_at, expires_at, hit_count)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(entity_id, mode) DO UPDATE SET
-                    max_depth   = excluded.max_depth,
-                    result_json = excluded.result_json,
+                    max_depth   = CASE WHEN excluded.max_depth >= perturbation_cache.max_depth
+                                       THEN excluded.max_depth ELSE perturbation_cache.max_depth END,
+                    result_json = CASE WHEN excluded.max_depth >= perturbation_cache.max_depth
+                                       THEN excluded.result_json ELSE perturbation_cache.result_json END,
                     created_at  = excluded.created_at,
                     expires_at  = excluded.expires_at,
                     hit_count   = 0

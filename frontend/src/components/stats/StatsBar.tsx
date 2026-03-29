@@ -9,7 +9,14 @@ function Stat({ label, value }: { label: string; value: string | number | undefi
   )
 }
 
-export function StatsBar({ stats }: { stats?: import('../../types/api').StatsResponse }) {
+export function StatsBar({ stats, error }: { stats?: import('../../types/api').StatsResponse; error?: Error | null }) {
+  if (error) {
+    return (
+      <div className="py-3 px-8 bg-forest-mid border border-forest-light rounded-xl text-center text-xs text-sage/60">
+        Stats unavailable
+      </div>
+    )
+  }
   return (
     <div className="grid grid-cols-4 gap-6 py-5 px-8 bg-forest-mid border border-forest-light rounded-xl">
       <Stat label="entities"       value={stats?.n_entities} />

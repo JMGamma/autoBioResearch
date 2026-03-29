@@ -45,11 +45,9 @@ _ALL_EDGES_SQL = text("""
 def get_subgraph(body: SubgraphRequest, conn: Connection = Depends(get_conn)):
     if not body.entity_ids:
         raise HTTPException(status_code=422, detail="entity_ids must not be empty")
-    if body.hops < 1 or body.hops > 3:
-        raise HTTPException(status_code=422, detail="hops must be between 1 and 3")
 
-    edge_limit = min(body.edge_limit, 200)
-    min_score = max(body.min_confidence_score, 0.0)
+    edge_limit = body.edge_limit
+    min_score = body.min_confidence_score
     entity_type_filter = set(body.entity_type_filter) if body.entity_type_filter else None
 
     nodes: dict[str, NodeView] = {}
@@ -75,7 +73,7 @@ def get_subgraph(body: SubgraphRequest, conn: Connection = Depends(get_conn)):
 
             # Apply entity type filter to both endpoints
             if entity_type_filter:
-                if row["node_a_type"] not in entity_type_filter or row["node_b_type"] not in entity_type_filter:
+                if row["node_a_type"] not in entity_type_filter and row["node_b_type"] not in entity_type_filter:
                     continue
 
             edge_id = row["id"]
@@ -123,5 +121,6 @@ def get_subgraph(body: SubgraphRequest, conn: Connection = Depends(get_conn)):
             "n_nodes": len(nodes),
             "n_edges": len(edges),
             "max_hops_reached": max_hops_reached,
+            "truncated": len(edges) >= edge_limit,
         },
     )

@@ -71,6 +71,15 @@ class AppConfig(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cache_db_path: str = "./explorer_cache.db"
+    # CORS: set to explicit origin(s) in production, e.g. ["https://yourapp.com"]
+    allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # API limits (must match Field constraints in schemas.py)
+    search_default_limit: int = 20
+    subgraph_max_edge_limit: int = 200
+    subgraph_max_hops: int = 3
+    paths_max_hops: int = 5
+    paths_max_paths: int = 50
+    perturbation_max_depth: int = 4
 
     # --- Perturbation ---
     perturbation_combination_exponent: float = 0.55  # α in: 1 - ∏(1 - |xᵢ|^α) multi-path score combination

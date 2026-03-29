@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 
 from autobioresearch.api.dependencies import get_conn
@@ -18,9 +19,6 @@ from autobioresearch.perturbation.sign_map import effect_to_sign
 from autobioresearch.storage.repositories import EntityRepo
 
 router = APIRouter()
-
-_MAX_HOPS_LIMIT = 5
-_MAX_PATHS_LIMIT = 50
 
 
 def _find_paths(
@@ -138,21 +136,29 @@ def _enrich_source_node(node: dict, entity: dict | None) -> dict:
 
 @router.post("/paths", response_model=PathsResponse)
 def find_paths(body: PathsRequest, conn: Connection = Depends(get_conn)):
-    if body.max_hops > _MAX_HOPS_LIMIT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"max_hops must be <= {_MAX_HOPS_LIMIT}",
-        )
-
     repo = EntityRepo(conn)
 
-    source_id = repo.find_by_synonym(body.source_entity)
-    if not source_id:
+    source_candidates = repo.find_by_synonym_candidates(body.source_entity)
+    source_ids = {c["entity_id"] for c in source_candidates}
+    if not source_ids:
         raise HTTPException(status_code=404, detail=f"Source entity not found: {body.source_entity!r}")
+    if len(source_ids) > 1:
+        raise HTTPException(status_code=409, detail={
+            "message": f"Ambiguous entity name: {body.source_entity!r}",
+            "candidates": [{"id": c["entity_id"], "canonical_name": c["canonical_name"], "entity_type": c["entity_type"], "organism": c["organism"]} for c in source_candidates],
+        })
+    source_id = next(iter(source_ids))
 
-    target_id = repo.find_by_synonym(body.target_entity)
-    if not target_id:
+    target_candidates = repo.find_by_synonym_candidates(body.target_entity)
+    target_ids = {c["entity_id"] for c in target_candidates}
+    if not target_ids:
         raise HTTPException(status_code=404, detail=f"Target entity not found: {body.target_entity!r}")
+    if len(target_ids) > 1:
+        raise HTTPException(status_code=409, detail={
+            "message": f"Ambiguous entity name: {body.target_entity!r}",
+            "candidates": [{"id": c["entity_id"], "canonical_name": c["canonical_name"], "entity_type": c["entity_type"], "organism": c["organism"]} for c in target_candidates],
+        })
+    target_id = next(iter(target_ids))
 
     if source_id == target_id:
         raise HTTPException(status_code=400, detail="Source and target must be different entities")
@@ -168,11 +174,27 @@ def find_paths(body: PathsRequest, conn: Connection = Depends(get_conn)):
         conn=conn,
         source_id=source_id,
         target_id=target_id,
-        max_hops=min(body.max_hops, _MAX_HOPS_LIMIT),
-        min_confidence=max(0.0, min(1.0, body.min_confidence)),
-        max_paths=min(body.max_paths, _MAX_PATHS_LIMIT),
+        max_hops=body.max_hops,
+        min_confidence=body.min_confidence,
+        max_paths=body.max_paths,
     )
     elapsed_ms = round((time.monotonic() - t0) * 1000)
+
+    # Batch-backfill display_name and entity_type for all nodes in all paths
+    node_ids = list({n["id"] for path in paths for n in path["nodes"]})
+    if node_ids:
+        _meta_sql = text(
+            "SELECT id, display_name, entity_type FROM entities WHERE id IN :ids"
+        ).bindparams(bindparam("ids", expanding=True))
+        meta = {
+            row["id"]: row
+            for row in conn.execute(_meta_sql, {"ids": tuple(node_ids)}).mappings()
+        }
+        for path in paths:
+            for node in path["nodes"]:
+                if node["id"] in meta:
+                    node["display_name"] = meta[node["id"]]["display_name"]
+                    node["entity_type"]  = meta[node["id"]]["entity_type"]
 
     # Backfill seed node display_name/entity_type in all paths
     for path in paths:
