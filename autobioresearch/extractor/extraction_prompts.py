@@ -64,6 +64,8 @@ CRITICAL RULES:
    - "co_expression" = gene expression correlation studies
    - "genetic_screen" = CRISPR, RNAi, yeast two-hybrid, genetic epistasis
    - "clinical" = human patient data, clinical trials
+   - "cited_claim" = interaction cited from a prior publication or stated as established \
+     background — the original evidence type is unknown from this paper alone
 4. Confidence levels:
    - "high" = multiple independent experiments or gold-standard assay (co-IP + functional validation)
    - "medium" = single clear direct experiment
@@ -72,13 +74,15 @@ CRITICAL RULES:
 6. For effect: use "activates", "inhibits", "binds", "phosphorylates", "ubiquitinates", \
    "cleaves", "recruits", "localizes", "transports", or null if unclear.
 7. Report organisms precisely: "Homo sapiens", "Mus musculus", "Rattus norvegicus", etc.
-8. Evidence source determines confidence — apply these rules strictly:
-   - Interactions DIRECTLY MEASURED in THIS paper's experiments → confidence based on rules 3–4 above.
+8. Evidence source determines evidence_type and confidence — apply these rules strictly:
+   - Interactions DIRECTLY MEASURED in THIS paper's experiments → evidence_type from rule 3, \
+     confidence based on rules 3–4 above.
    - Interactions cited from prior work or mentioned as established background (e.g. "It is known \
-     that X activates Y", "Previous studies showed...") → extract with confidence "low" and \
-     set reasoning to note it is cited/reviewed rather than directly demonstrated here.
-   - Review papers that summarise a field → extract all interactions described, but ALL must be \
-     confidence "low" unless the review itself presents new meta-analysis or pooled data.
+     that X activates Y", "Previous studies showed...", "as reported by Smith et al.") → \
+     evidence_type MUST be "cited_claim", confidence "low", reasoning must note it is cited \
+     rather than directly demonstrated here.
+   - Review papers that summarise a field → ALL interactions must be evidence_type "cited_claim" \
+     and confidence "low" unless the review itself presents new meta-analysis or pooled data.
    - Do NOT fabricate interactions not mentioned anywhere in the text.
 """
 
@@ -159,7 +163,8 @@ EXTRACTION_TOOL = {
                             "enum": [
                                 "in_vitro", "in_vivo", "structural",
                                 "computational", "co_expression",
-                                "genetic_screen", "clinical", "unknown"
+                                "genetic_screen", "clinical",
+                                "cited_claim", "unknown"
                             ]
                         },
                         "evidence_subtype": {

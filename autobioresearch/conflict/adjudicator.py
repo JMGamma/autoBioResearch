@@ -18,6 +18,7 @@ class EvidenceAdjudicator:
         "genetic_screen": 0.65,
         "co_expression": 0.45,
         "computational": 0.35,
+        "cited_claim": 0.35,
         "unknown": 0.3,
     }
 

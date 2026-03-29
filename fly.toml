@@ -22,5 +22,11 @@ primary_region = "iad"
   cpu_kind = "shared"
   cpus = 1
 
+[[mounts]]
+  source      = "autobio_data"
+  destination = "/data"
+
 [env]
-  PORT = "8000"
+  PORT          = "8000"
+  DB_PATH       = "/data/autobioresearch.db"
+  CACHE_DB_PATH = "/data/explorer_cache.db"

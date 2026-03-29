@@ -28,6 +28,7 @@ class EvidenceType(StrEnum):
     GENETIC_SCREEN = "genetic_screen"
     CLINICAL = "clinical"
     CURATED_DB = "curated_db"
+    CITED_CLAIM = "cited_claim"
     UNKNOWN = "unknown"
 
 

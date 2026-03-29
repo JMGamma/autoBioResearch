@@ -180,9 +180,23 @@ class LLMClient:
             tool_choice={"type": "tool", "name": tool["name"]},
         )
 
+        stop_reason = getattr(response, "stop_reason", None)
+
         for block in response.content:
             if block.type == "tool_use" and block.name == tool["name"]:
+                if stop_reason == "max_tokens":
+                    logger.warning(
+                        f"Anthropic response truncated (stop_reason=max_tokens) for tool "
+                        f"'{tool['name']}'. Tool call present but input may be partial. "
+                        f"Consider raising llm_max_tokens in config.yaml."
+                    )
                 return block.input
+
+        if stop_reason == "max_tokens":
+            raise LLMTruncatedError(
+                f"Anthropic response truncated for tool '{tool['name']}' "
+                f"(max_tokens={self._config.llm_max_tokens})"
+            )
 
         logger.warning("Anthropic response did not contain expected tool_use block")
         return None
