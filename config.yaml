@@ -29,7 +29,7 @@ crawler_threads: 4
 papers_per_query: 5
 max_full_text_per_cycle: 20
 pubmed_requests_per_second: 3
-semantic_scholar_requests_per_second: 1
+semantic_scholar_requests_per_second: 0.3  # unauthenticated limit ~100 req/5min; set to 1.0 once SEMANTIC_SCHOLAR_API_KEY is configured
 
 # --- Extraction ---
 max_chunk_chars: 100000
