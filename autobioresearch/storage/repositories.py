@@ -492,20 +492,20 @@ class InteractionRepo:
         different effects or different directed claims.
         Excludes pairs already in the conflicts table.
         """
+        # Split the OR join into two UNION ALL branches so SQLite can use the
+        # composite indexes (idx_interactions_conflict_fwd / _rev) on each branch
+        # independently.  A single OR join condition prevents index use entirely,
+        # causing an O(n²) full scan that hangs on large databases.
         stmt = text("""
-            SELECT a.id as a_id, b.id as b_id
+            SELECT a.id AS a_id, b.id AS b_id
             FROM interactions a
-            JOIN interactions b ON (
-                (a.entity_a_id = b.entity_a_id AND a.entity_b_id = b.entity_b_id)
-                OR (a.entity_a_id = b.entity_b_id AND a.entity_b_id = b.entity_a_id)
-            )
-            WHERE a.interaction_type = b.interaction_type
-              AND (
-                    (
-                        a.effect IS NOT NULL
-                        AND b.effect IS NOT NULL
-                        AND a.effect != b.effect
-                    )
+            JOIN interactions b
+              ON a.entity_a_id = b.entity_a_id
+             AND a.entity_b_id = b.entity_b_id
+             AND a.interaction_type = b.interaction_type
+             AND a.id < b.id
+            WHERE (
+                    (a.effect IS NOT NULL AND b.effect IS NOT NULL AND a.effect != b.effect)
                     OR (
                         COALESCE(a.direction, 'undirected') != COALESCE(b.direction, 'undirected')
                         AND 'undirected' NOT IN (
@@ -514,17 +514,13 @@ class InteractionRepo:
                         )
                     )
                   )
-              AND a.id < b.id
-              -- Require independent sources: A must have a paper B does not have,
-              -- and B must have a paper A does not have.
-              -- This filters out complementary effects extracted from the same paper.
+              -- Require independent sources (papers unique to each side).
               AND EXISTS (
                   SELECT 1 FROM evidence ea
                   WHERE ea.interaction_id = a.id
                     AND NOT EXISTS (
                         SELECT 1 FROM evidence eb
-                        WHERE eb.interaction_id = b.id
-                          AND eb.paper_id = ea.paper_id
+                        WHERE eb.interaction_id = b.id AND eb.paper_id = ea.paper_id
                     )
               )
               AND EXISTS (
@@ -532,8 +528,7 @@ class InteractionRepo:
                   WHERE eb.interaction_id = b.id
                     AND NOT EXISTS (
                         SELECT 1 FROM evidence ea
-                        WHERE ea.interaction_id = a.id
-                          AND ea.paper_id = eb.paper_id
+                        WHERE ea.interaction_id = a.id AND ea.paper_id = eb.paper_id
                     )
               )
               AND NOT EXISTS (
@@ -541,6 +536,49 @@ class InteractionRepo:
                   WHERE (interaction_a_id = a.id AND interaction_b_id = b.id)
                      OR (interaction_a_id = b.id AND interaction_b_id = a.id)
               )
+
+            UNION ALL
+
+            -- Reversed entity-pair order (A→B stored as B→A in one interaction).
+            SELECT a.id AS a_id, b.id AS b_id
+            FROM interactions a
+            JOIN interactions b
+              ON a.entity_a_id = b.entity_b_id
+             AND a.entity_b_id = b.entity_a_id
+             AND a.interaction_type = b.interaction_type
+             AND a.id < b.id
+            WHERE (
+                    (a.effect IS NOT NULL AND b.effect IS NOT NULL AND a.effect != b.effect)
+                    OR (
+                        COALESCE(a.direction, 'undirected') != COALESCE(b.direction, 'undirected')
+                        AND 'undirected' NOT IN (
+                            COALESCE(a.direction, 'undirected'),
+                            COALESCE(b.direction, 'undirected')
+                        )
+                    )
+                  )
+              AND EXISTS (
+                  SELECT 1 FROM evidence ea
+                  WHERE ea.interaction_id = a.id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM evidence eb
+                        WHERE eb.interaction_id = b.id AND eb.paper_id = ea.paper_id
+                    )
+              )
+              AND EXISTS (
+                  SELECT 1 FROM evidence eb
+                  WHERE eb.interaction_id = b.id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM evidence ea
+                        WHERE ea.interaction_id = a.id AND ea.paper_id = eb.paper_id
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM conflicts
+                  WHERE (interaction_a_id = a.id AND interaction_b_id = b.id)
+                     OR (interaction_a_id = b.id AND interaction_b_id = a.id)
+              )
+
             LIMIT :limit
         """)
         rows = self.conn.execute(stmt, {"limit": limit}).all()

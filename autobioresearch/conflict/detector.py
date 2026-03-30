@@ -25,11 +25,13 @@ class ConflictDetector:
         Find new conflicts and insert them into the DB.
         Returns count of new conflicts found.
         """
+        logger.info("Scanning for new conflict pairs (limit=%d)...", config.max_candidate_pairs_per_cycle)
         candidate_pairs = repos.interactions.get_pairs_for_conflict_detection(
             limit=config.max_candidate_pairs_per_cycle
         )
 
         if not candidate_pairs:
+            logger.info("No new conflict pairs found")
             return 0
 
         logger.info(f"Evaluating {len(candidate_pairs)} candidate conflict pairs")

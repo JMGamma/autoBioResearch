@@ -437,6 +437,40 @@ class PaperExtractor:
         "commensal": "symbiont",
         "microbiome": "symbiont",
         "probiotic": "symbiont",
+        # Small molecules / exogenous compounds
+        "vitamin": "molecule",
+        "supplement": "molecule",
+        "steroid": "molecule",
+        "lipid": "molecule",
+        "fatty_acid": "molecule",
+        "ion": "molecule",
+        "nucleotide": "molecule",
+        "amino_acid": "molecule",
+        "sugar": "molecule",
+        "glycan": "molecule",
+        "carbohydrate": "molecule",
+        "cofactor": "molecule",
+        "hormone_small_molecule": "molecule",
+        # Protein subtypes that LLMs name explicitly
+        "enzyme": "protein",
+        "kinase": "protein",
+        "phosphatase": "protein",
+        "protease": "protein",
+        "receptor": "protein",
+        "ion_channel": "protein",
+        "transporter": "protein",
+        "cytokine": "protein",
+        "chemokine": "protein",
+        "growth_factor": "protein",
+        "transcription_factor": "protein",
+        "antibody": "protein",
+        "hormone_protein": "protein",
+        "hormone": "protein",          # default hormones to protein; steroid hormones hit "steroid" first
+        "neuropeptide": "protein",
+        "adaptor_protein": "protein",
+        "scaffold_protein": "protein",
+        "chaperone": "protein",
+        "ligand": "protein",           # most biological ligands are proteins; small-molecule ligands should be "molecule"
     }
 
     @classmethod
@@ -447,7 +481,7 @@ class PaperExtractor:
         then applies an alias table for invented type names.
         e.g. "Direct Binding" → "direct_binding", "tissue_cell_type" → "cell_type"
         """
-        if not value:
+        if not isinstance(value, str) or not value:
             return fallback
         normalised = value.lower().strip().replace(" ", "_").replace("-", "_")
         return cls._ENTITY_TYPE_ALIASES.get(normalised, normalised)
@@ -455,14 +489,16 @@ class PaperExtractor:
     @classmethod
     def _norm_interaction_type(cls, value: str | None) -> str:
         """Like _norm but applies the interaction_type alias table."""
-        if not value:
+        if not isinstance(value, str) or not value:
             return "unknown"
         normalised = value.lower().strip().replace(" ", "_").replace("-", "_")
         return cls._INTERACTION_TYPE_ALIASES.get(normalised, normalised)
 
     @staticmethod
     def _norm_confidence(value: str | None) -> str:
-        v = (value or "low").lower().strip()
+        if not isinstance(value, str) or not value:
+            value = "low"
+        v = value.lower().strip()
         return v if v in ("high", "medium", "low") else "low"
 
     def _parse_llm_output(

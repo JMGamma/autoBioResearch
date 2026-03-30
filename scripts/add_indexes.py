@@ -51,6 +51,39 @@ _INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_entities_canonical_name "
         "ON entities (canonical_name COLLATE NOCASE);",
     ),
+    # Indexes for the NOT EXISTS conflict-pair deduplication check.
+    # The query checks both orderings (a,b) and (b,a) via OR — two indexes cover both.
+    (
+        "idx_conflicts_pair_ab",
+        "CREATE INDEX IF NOT EXISTS idx_conflicts_pair_ab "
+        "ON conflicts (interaction_a_id, interaction_b_id);",
+    ),
+    (
+        "idx_conflicts_pair_ba",
+        "CREATE INDEX IF NOT EXISTS idx_conflicts_pair_ba "
+        "ON conflicts (interaction_b_id, interaction_a_id);",
+    ),
+    # Composite indexes for the conflict detection self-join.
+    # The query joins interactions on (entity_a_id, entity_b_id, interaction_type)
+    # in both forward and reverse directions — two indexes cover both OR branches.
+    (
+        "idx_interactions_conflict_fwd",
+        "CREATE INDEX IF NOT EXISTS idx_interactions_conflict_fwd "
+        "ON interactions (entity_a_id, entity_b_id, interaction_type);",
+    ),
+    (
+        "idx_interactions_conflict_rev",
+        "CREATE INDEX IF NOT EXISTS idx_interactions_conflict_rev "
+        "ON interactions (entity_b_id, entity_a_id, interaction_type);",
+    ),
+    # Covering index for the correlated NOT EXISTS subqueries in conflict detection:
+    # evidence(interaction_id, paper_id) lets SQLite resolve each cross-check
+    # without touching the main evidence rows.
+    (
+        "idx_evidence_interaction_paper",
+        "CREATE INDEX IF NOT EXISTS idx_evidence_interaction_paper "
+        "ON evidence (interaction_id, paper_id);",
+    ),
 ]
 
 

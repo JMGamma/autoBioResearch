@@ -32,24 +32,62 @@ Xenopus oocytes are injected with mammalian mRNA only for electrophysiology read
 The test: is the non-mammalian organism acting as an endogenous biological agent in the \
 interaction, or merely a heterologous production/assay host? Only the former is in scope.
 
-ENTITY TYPE GUIDANCE:
-Use the most specific type available. Key distinctions:
-- "modification": Use when a post-translational or chemical modification IS the entity \
-  being discussed (e.g. "H3K27 acetylation", "AKT phosphorylation at Ser473", \
-  "K48-linked ubiquitination"). This is distinct from using "phosphorylates" as an \
-  interaction effect — use this type when the modification itself is the subject.
-- "structure": Use for subcellular organelles (mitochondria, nucleus, Golgi apparatus, \
-  endoplasmic reticulum, lysosome, centrosome) AND anatomical structures/tissues \
-  (retina, choroid, fascia, cortex, liver, hippocampus, stroma). Do NOT classify \
-  these as "cell_type" or "organ" — use "structure".
-- "pathogen": Use for disease-causing external organisms interacting with mammalian \
-  biology (e.g. SARS-CoV-2, Mycobacterium tuberculosis, Candida albicans, \
-  Plasmodium falciparum, influenza virus). Use when the organism is associated with \
-  infection or disease.
-- "symbiont": Use for non-pathogenic external organisms — commensal or mutualistic \
-  microorganisms (e.g. Lactobacillus reuteri, Bacteroides thetaiotaomicron, gut \
-  microbiome members described in a beneficial or neutral context). When ambiguous \
-  (e.g. E. coli as a model/lab strain), default to "pathogen".
+ENTITY TYPE — STRICT RULES:
+entity_type MUST be exactly one of these 16 values. Any other value will be rejected. \
+If an entity does not clearly fit a specific type, use "unknown" rather than inventing \
+a new category name.
+
+Allowed values and what they cover:
+- "protein"      — any protein, enzyme, receptor, kinase, transcription factor, \
+                   antibody, cytokine, chemokine, growth factor, hormone (if it is a \
+                   protein/peptide, e.g. insulin, GLP-1), structural protein
+- "gene"         — a gene locus or genetic element (use when discussed at the DNA/locus \
+                   level rather than as a protein product)
+- "molecule"     — small molecules: drugs, vitamins, supplements, steroids, lipids, \
+                   fatty acids, cofactors, ions, nucleotides, amino acids, sugars, \
+                   glycans, chemical compounds, any low-molecular-weight compound that \
+                   is not a protein/RNA/metabolite produced by a metabolic pathway
+- "metabolite"   — endogenous metabolic intermediates produced/consumed by metabolic \
+                   pathways (ATP, NADH, glucose, lactate, pyruvate, acetyl-CoA, etc.). \
+                   When unsure between "molecule" and "metabolite", prefer "metabolite" \
+                   for endogenous compounds and "molecule" for exogenous ones
+- "rna"          — any RNA species: mRNA, miRNA, lncRNA, siRNA, snRNA, rRNA, tRNA, \
+                   circRNA, piRNA
+- "pathway"      — named signalling or metabolic pathways (NF-κB pathway, MAPK cascade, \
+                   glycolysis, TCA cycle)
+- "phenotype"    — observable biological traits or cellular states (apoptosis, \
+                   senescence, differentiation, proliferation, migration)
+- "disease"      — named diseases or clinical conditions (cancer, diabetes, \
+                   Alzheimer's disease, sepsis)
+- "cell_type"    — primary cell types (CD4+ T cell, macrophage, neuron, hepatocyte). \
+                   NOT immortalised lines — those are "cell_line"
+- "cell_line"    — immortalised/transformed cell lines (HEK293, HeLa, Jurkat, U87MG)
+- "organism"     — whole organisms used as model systems (mouse, rat, Homo sapiens \
+                   when the species itself is the entity)
+- "complex"      — named macromolecular complexes (RISC complex, proteasome, \
+                   NADPH oxidase complex, SWI/SNF)
+- "modification" — a PTM or chemical modification that IS the entity being discussed \
+                   (H3K27ac, AKT pSer473, K48-linked ubiquitination). NOT the verb \
+                   "phosphorylates" in an interaction — only when the modification \
+                   itself is the named subject
+- "structure"    — subcellular organelles (mitochondria, nucleus, Golgi, lysosome) AND \
+                   anatomical structures/tissues (retina, cortex, liver, fascia, \
+                   stroma). Do NOT use "cell_type" or "organ" for these
+- "pathogen"     — disease-causing organisms: viruses, bacteria, fungi, parasites \
+                   (SARS-CoV-2, M. tuberculosis, Candida albicans, Plasmodium)
+- "symbiont"     — non-pathogenic commensal or mutualistic organisms (Lactobacillus \
+                   reuteri, gut microbiome members in a beneficial/neutral context). \
+                   When ambiguous, default to "pathogen"
+
+COERCION EXAMPLES — map these invented categories to the correct type:
+- vitamin, supplement, cofactor, ion, steroid, lipid, fatty acid, drug, \
+  compound, chemical → "molecule"
+- hormone (if protein/peptide) → "protein"; hormone (if small molecule, e.g. \
+  cortisol, estrogen) → "molecule"
+- enzyme, kinase, phosphatase, protease, receptor, ion channel, transporter, \
+  cytokine, chemokine, growth factor, transcription factor, antibody → "protein"
+- tissue, organ, organelle → "structure"
+- anything else that does not fit → "unknown"
 
 CRITICAL RULES:
 1. Only extract interactions that are EXPLICITLY stated or DIRECTLY measured in this paper's \

@@ -596,6 +596,7 @@ def run_cycle(
     conflict_resolver=None,
     verifier: InteractionVerifier | None = None,
     planner: QueryPlanner | None = None,
+    conflicts_only: bool = False,
 ) -> dict:
     """Run one full autoresearch cycle. Returns cycle stats."""
 
@@ -604,36 +605,43 @@ def run_cycle(
         _set_runtime_context(cycle=cycle, phase="cycle_start")
 
         logger.info(f"{'='*60}")
-        logger.info(f"CYCLE {cycle} START")
+        logger.info(f"CYCLE {cycle} START" + (" [conflicts-only]" if conflicts_only else ""))
         logger.info(f"{'='*60}")
 
         # --- Phase 0: Seed if needed ---
-        _set_runtime_context(phase="seed_queries")
-        _seed_initial_queries(repos, config)
-        conn.commit()
+        if not conflicts_only:
+            _set_runtime_context(phase="seed_queries")
+            _seed_initial_queries(repos, config)
+            conn.commit()
 
         # --- Phase 0.5: plan pending work ---
-        if planner:
+        if planner and not conflicts_only:
             _set_runtime_context(phase="plan_queries")
             planner.plan_pending_queries(repos, config)
             conn.commit()
 
         # --- Phase 1-2: Interleave fetch + extract ---
-        _set_runtime_context(phase="fetch_extract")
-        fetch_stats, extraction_stats = run_interleaved_fetch_extraction_phase(
-            repos, config, pubmed, s2, extractor, pmc_fetcher, conn
-        )
+        if conflicts_only:
+            fetch_stats = _empty_fetch_stats()
+            extraction_stats = _empty_extraction_stats()
+        else:
+            _set_runtime_context(phase="fetch_extract")
+            fetch_stats, extraction_stats = run_interleaved_fetch_extraction_phase(
+                repos, config, pubmed, s2, extractor, pmc_fetcher, conn
+            )
 
         # --- Phase 3: Detect conflicts (Arm 2) ---
         new_conflicts = 0
         conflicts_resolved = 0
-        if conflict_detector:
+        if _shutdown:
+            logger.info("Shutdown in progress — skipping conflict/verification phases.")
+        if conflict_detector and not _shutdown:
             _set_runtime_context(phase="detect_conflicts")
             new_conflicts = conflict_detector.detect(repos, config)
             conn.commit()
 
         # --- Phase 4: Classify + resolve conflicts ---
-        if conflict_resolver:
+        if conflict_resolver and not _shutdown:
             _set_runtime_context(phase="resolve_conflicts")
             conflicts_resolved = conflict_resolver.analyze_and_resolve(repos, config)
             conn.commit()
@@ -644,12 +652,15 @@ def run_cycle(
             resolution_queries = 0
 
         _set_runtime_context(phase="verify_claims")
-        verification_stats = run_verification_phase(repos, config, verifier)
-        conn.commit()
+        if not _shutdown:
+            verification_stats = run_verification_phase(repos, config, verifier)
+            conn.commit()
+        else:
+            verification_stats = {"claims_verified": 0, "claims_needing_review": 0}
 
         # --- Phase 5: Generate targeted next-step queries ---
         _set_runtime_context(phase="generate_targeted_queries")
-        gap_queries = run_query_generation_phase(repos, config, planner) if planner else 0
+        gap_queries = run_query_generation_phase(repos, config, planner) if planner and not conflicts_only else 0
         conn.commit()
 
         # --- Phase 6: Score ---
@@ -705,7 +716,9 @@ def main():
     parser = argparse.ArgumentParser(description="AutoBioResearch autonomous loop")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--cycles", type=int, default=0, help="Max cycles (0=forever)")
-    parser.add_argument("--no-conflicts", action="store_true", help="Skip conflict detection (Arm 2)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--no-conflicts", action="store_true", help="Skip conflict detection/resolution (Arm 2)")
+    mode.add_argument("--conflicts-only", action="store_true", help="Run conflict resolution arm only (skip fetch/extract)")
     args = parser.parse_args()
 
     config = AppConfig.from_yaml(args.config)
@@ -790,6 +803,10 @@ def main():
         conflict_detector = ConflictDetector()
         conflict_resolver = ConflictResolver(llm=llm)
 
+    conflicts_only = args.conflicts_only
+    if conflicts_only:
+        logger.info("Running in conflicts-only mode — fetch/extract arm disabled")
+
     # Main loop
     cycle = 0
     while not _shutdown:
@@ -809,6 +826,7 @@ def main():
                 conflict_resolver=conflict_resolver,
                 verifier=verifier,
                 planner=planner,
+                conflicts_only=conflicts_only,
             )
             logger.info(f"Cycle {cycle} complete | Score: {stats['score']:.2f}")
         except Exception as e:
