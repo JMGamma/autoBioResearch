@@ -1,3 +1,4 @@
+import { useEffect, useRef, useId } from 'react'
 import type { EvidenceItem } from '../../types/api'
 import { useEvidence } from '../../hooks/useEvidence'
 import { Spinner } from '../ui/Spinner'
@@ -61,12 +62,50 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
 export function EvidenceDrawer({ interactionId, onClose }: { interactionId: string | null; onClose: () => void }) {
   const { data, isLoading, error } = useEvidence(interactionId)
   const isOpen = interactionId !== null
+  const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+
+  // Focus close button when drawer opens
+  useEffect(() => {
+    if (isOpen) {
+      // Small delay to allow CSS transition to start
+      const t = setTimeout(() => closeBtnRef.current?.focus(), 50)
+      return () => clearTimeout(t)
+    }
+  }, [isOpen])
+
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [isOpen, onClose])
 
   return (
-    <div className={`fixed top-0 right-0 h-full w-96 bg-forest-mid border-l border-forest-light shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className={`fixed top-0 right-0 h-full w-96 max-w-full bg-forest-mid border-l border-forest-light shadow-2xl z-50 flex flex-col transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+    >
       <div className="flex items-center justify-between px-4 py-3 border-b border-forest-light bg-forest flex-shrink-0">
-        <h3 className="text-sm font-semibold text-snow">Evidence</h3>
-        <button onClick={onClose} className="text-sage hover:text-snow p-1 rounded transition-colors">
+        <div>
+          <h3 id={titleId} className="text-sm font-semibold text-snow">Evidence</h3>
+          {data?.entity_a_name && (
+            <p className="text-xs text-sage mt-0.5">
+              {data.entity_a_name} → {data.entity_b_name}
+            </p>
+          )}
+        </div>
+        <button
+          ref={closeBtnRef}
+          onClick={onClose}
+          className="text-sage hover:text-snow p-1 rounded transition-colors"
+          aria-label="Close evidence drawer"
+        >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path d="M6 18 18 6M6 6l12 12" />
           </svg>

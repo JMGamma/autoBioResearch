@@ -80,6 +80,8 @@ export interface EvidenceItem {
 
 export interface EvidenceResponse {
   interaction_id: string
+  entity_a_name: string | null
+  entity_b_name: string | null
   evidence: EvidenceItem[]
 }
 
@@ -177,6 +179,7 @@ export interface StatsResponse {
   n_interactions: number
   n_evidence: number
   n_open_conflicts: number
+  n_papers: number
   last_score: number | null
   last_cycle_timestamp: string | null
 }

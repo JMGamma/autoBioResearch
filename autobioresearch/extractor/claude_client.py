@@ -381,7 +381,7 @@ class LLMClient:
                     logger.info(f"Recovered partial JSON from truncated tool call for '{tool_name}'")
                     return repaired
                 result = self._extract_json_fallback(clean_content) or self._extract_json_fallback(raw_reasoning)
-                if result is None and finish_reason == "length":
+                if finish_reason == "length":
                     raise LLMTruncatedError(
                         f"LLM response truncated for tool '{tool_name}' "
                         f"(max_tokens={self._config.llm_max_tokens})"
@@ -413,7 +413,7 @@ class LLMClient:
             f"{clean_content[:300] if clean_content else '(empty)'}"
         )
         result = self._extract_json_fallback(clean_content) or self._extract_json_fallback(raw_reasoning)
-        if result is None and finish_reason == "length":
+        if finish_reason == "length":
             raise LLMTruncatedError(
                 f"LLM response truncated for tool '{tool_name}' "
                 f"(max_tokens={self._config.llm_max_tokens})"

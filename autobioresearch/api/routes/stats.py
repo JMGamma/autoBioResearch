@@ -11,6 +11,7 @@ from autobioresearch.storage.repositories import (
     EntityRepo,
     EvidenceRepo,
     InteractionRepo,
+    PaperRepo,
 )
 
 router = APIRouter()
@@ -22,6 +23,7 @@ def get_stats(conn: Connection = Depends(get_conn)):
     n_interactions = InteractionRepo(conn).count()
     n_evidence = EvidenceRepo(conn).count()
     n_open_conflicts = ConflictRepo(conn).count_open()
+    n_papers = PaperRepo(conn).count()
 
     last_row = conn.execute(text("""
         SELECT score, timestamp FROM metrics_log ORDER BY id DESC LIMIT 1
@@ -32,6 +34,7 @@ def get_stats(conn: Connection = Depends(get_conn)):
         n_interactions=n_interactions,
         n_evidence=n_evidence,
         n_open_conflicts=n_open_conflicts,
+        n_papers=n_papers,
         last_score=last_row["score"] if last_row else None,
         last_cycle_timestamp=last_row["timestamp"] if last_row else None,
     )

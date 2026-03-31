@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useEntityDetail } from '../hooks/useEntityDetail'
 import { useSubgraph } from '../hooks/useSubgraph'
@@ -11,19 +11,9 @@ import { PerturbationPanel } from '../components/perturbation/PerturbationPanel'
 import { PathExplorer } from '../components/paths/PathExplorer'
 import { Spinner } from '../components/ui/Spinner'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
-import { SearchBar } from '../components/search/SearchBar'
-import { SearchResults } from '../components/search/SearchResults'
-import { useEntitySearch } from '../hooks/useEntitySearch'
+import { SearchCombobox } from '../components/search/SearchCombobox'
 import type { SubgraphRequest, PathResult } from '../types/api'
 
-function useDebounce(value: string, delay: number) {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return debounced
-}
 
 export function EntityPage() {
   const { id } = useParams<{ id: string }>()
@@ -38,11 +28,8 @@ export function EntityPage() {
   const [perturbationScores, setPerturbationScores] = useState<Map<string, number> | null>(null)
   const [selectedPath, setSelectedPath] = useState<PathResult | null>(null)
   const [leftTab, setLeftTab] = useState<'perturbation' | 'paths'>('perturbation')
-
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
-  const debouncedSearch = useDebounce(searchQuery, 250)
-  const { data: searchResults, isLoading: searchLoading, error: searchError } = useEntitySearch(debouncedSearch)
+  const [edgeHintDismissed, setEdgeHintDismissed] = useState(false)
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(false)
 
   const { data: entity, isLoading: entityLoading, error: entityError } = useEntityDetail(id)
 
@@ -65,6 +52,11 @@ export function EntityPage() {
 
   const nodes = subgraph?.nodes ?? []
   const edges = subgraph?.edges ?? []
+
+  function handleEdgeClick(edgeId: string) {
+    setSelectedEdgeId(edgeId)
+    setEdgeHintDismissed(true)
+  }
 
   if (!id) { navigate('/'); return null }
 
@@ -90,6 +82,62 @@ export function EntityPage() {
     )
   }
 
+  const showEmptyState = !graphLoading && nodes.length === 0 && subgraph !== undefined
+  const showEdgeHint = !edgeHintDismissed && nodes.length > 0 && !graphLoading
+
+  const leftPanel = (
+    <div className="flex flex-col gap-3 p-3 overflow-y-auto h-full bg-forest-dark">
+      <EntitySummaryCard entity={entity} />
+      <GraphControls
+        hops={hops}
+        onHopsChange={setHops}
+        minConfidence={minConfidence}
+        onMinConfidenceChange={setMinConfidence}
+        entityTypeFilter={entityTypeFilter}
+        onEntityTypeFilterChange={setEntityTypeFilter}
+        availableEntityTypes={availableEntityTypes}
+        layout={layout}
+        onLayoutChange={setLayout}
+        showUnknown={showUnknown}
+        onShowUnknownChange={setShowUnknown}
+        isLoading={graphLoading}
+      />
+      {/* Tab strip */}
+      <div className="flex border border-forest-light rounded-lg overflow-hidden text-xs" role="tablist">
+        {(['perturbation', 'paths'] as const).map(tab => (
+          <button
+            key={tab}
+            role="tab"
+            aria-selected={leftTab === tab}
+            onClick={() => setLeftTab(tab)}
+            className={`flex-1 py-2 capitalize transition-colors ${
+              leftTab === tab
+                ? 'bg-forest-mid text-snow'
+                : 'bg-transparent text-sage hover:text-snow'
+            }`}
+          >
+            {tab === 'perturbation' ? 'Perturbation' : 'Find Path'}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel">
+        {leftTab === 'perturbation' && (
+          <PerturbationPanel
+            seedName={entity.display_name}
+            onScoresChange={scores => { setPerturbationScores(scores); setSelectedPath(null) }}
+          />
+        )}
+        {leftTab === 'paths' && (
+          <PathExplorer
+            sourceEntityName={entity.display_name}
+            onPathSelected={path => { setSelectedPath(path); setPerturbationScores(null) }}
+          />
+        )}
+      </div>
+    </div>
+  )
+
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-forest-dark">
       {/* Top nav bar */}
@@ -103,21 +151,12 @@ export function EntityPage() {
           </svg>
           <span className="font-semibold text-snow">AutoBio<span className="text-sage">Research</span></span>
         </button>
-        <div className="relative flex-1 max-w-md">
-          <SearchBar
-            value={searchQuery}
-            onChange={v => { setSearchQuery(v); setSearchOpen(true) }}
+        <div className="flex-1 max-w-md">
+          <SearchCombobox
+            onSelect={r => navigate(`/entity/${r.id}`)}
             placeholder="Search…"
+            size="compact"
           />
-          {searchOpen && (
-            <SearchResults
-              results={searchResults}
-              isLoading={searchLoading}
-              error={searchError}
-              query={debouncedSearch}
-              onSelect={r => { setSearchOpen(false); setSearchQuery(''); navigate(`/entity/${r.id}`) }}
-            />
-          )}
         </div>
         <div className="text-xs text-sage flex-shrink-0 flex items-center gap-2">
           {subgraph && `${nodes.length} nodes · ${edges.length} edges`}
@@ -128,53 +167,17 @@ export function EntityPage() {
       </header>
 
       {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left panel */}
-        <div className="w-80 flex-shrink-0 flex flex-col gap-3 p-3 overflow-y-auto bg-forest-dark border-r border-forest-light">
-          <EntitySummaryCard entity={entity} />
-          <GraphControls
-            hops={hops}
-            onHopsChange={setHops}
-            minConfidence={minConfidence}
-            onMinConfidenceChange={setMinConfidence}
-            entityTypeFilter={entityTypeFilter}
-            onEntityTypeFilterChange={setEntityTypeFilter}
-            availableEntityTypes={availableEntityTypes}
-            layout={layout}
-            onLayoutChange={setLayout}
-            showUnknown={showUnknown}
-            onShowUnknownChange={setShowUnknown}
-            isLoading={graphLoading}
-          />
-          {/* Tab strip */}
-          <div className="flex border border-forest-light rounded-lg overflow-hidden text-xs">
-            {(['perturbation', 'paths'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setLeftTab(tab)}
-                className={`flex-1 py-2 capitalize transition-colors ${
-                  leftTab === tab
-                    ? 'bg-forest-mid text-snow'
-                    : 'bg-transparent text-sage hover:text-snow'
-                }`}
-              >
-                {tab === 'perturbation' ? 'Perturbation' : 'Find Path'}
-              </button>
-            ))}
-          </div>
-
-          {leftTab === 'perturbation' && (
-            <PerturbationPanel
-              seedName={entity.display_name}
-              onScoresChange={scores => { setPerturbationScores(scores); setSelectedPath(null) }}
-            />
-          )}
-          {leftTab === 'paths' && (
-            <PathExplorer
-              sourceEntityName={entity.display_name}
-              onPathSelected={path => { setSelectedPath(path); setPerturbationScores(null) }}
-            />
-          )}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Left panel — desktop: fixed sidebar; mobile: bottom sheet */}
+        <div className={`
+          md:w-80 md:flex-shrink-0 md:flex md:flex-col md:border-r md:border-forest-light md:relative md:translate-y-0
+          fixed bottom-0 left-0 right-0 z-30 max-h-[65vh] overflow-y-auto
+          transition-transform duration-300 ease-in-out
+          border-t border-forest-light shadow-2xl
+          md:max-h-none md:shadow-none md:border-t-0
+          ${mobileControlsOpen ? 'translate-y-0' : 'translate-y-full md:translate-y-0'}
+        `}>
+          {leftPanel}
         </div>
 
         {/* Graph canvas */}
@@ -184,6 +187,28 @@ export function EntityPage() {
               <Spinner size="sm" />
             </div>
           )}
+
+          {/* Empty state */}
+          {showEmptyState && (
+            <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+              <div className="text-center space-y-2 px-8">
+                <p className="text-mist text-sm">
+                  No interactions found for <span className="text-snow font-medium">{entity.display_name}</span> at {hops} hop{hops !== 1 ? 's' : ''}.
+                </p>
+                <p className="text-sage text-xs">Try increasing hops or removing filters.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Edge-click discovery hint */}
+          {showEdgeHint && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+              <span className="bg-forest/80 text-sage text-xs px-3 py-1 rounded-full backdrop-blur-sm border border-forest-light/50">
+                Click any edge to see its paper evidence
+              </span>
+            </div>
+          )}
+
           <GraphCanvas
             nodes={nodes}
             edges={edges}
@@ -192,15 +217,36 @@ export function EntityPage() {
             showUnknown={showUnknown}
             perturbationScores={perturbationScores}
             selectedPath={selectedPath ? { nodeIds: selectedPath.nodes.map(n => n.id), edgeIds: selectedPath.edges.map(e => e.id) } : null}
-            onEdgeClick={setSelectedEdgeId}
+            onEdgeClick={handleEdgeClick}
             onNodeClick={nodeId => { if (nodeId !== id) navigate(`/entity/${nodeId}`) }}
           />
           <GraphLegend
             entityTypes={availableEntityTypes}
             showPerturbation={perturbationScores !== null}
           />
+
+          {/* Mobile controls toggle */}
+          <button
+            onClick={() => setMobileControlsOpen(v => !v)}
+            className="md:hidden absolute bottom-4 left-4 z-20 bg-forest border border-forest-light rounded-full px-4 py-2 text-xs text-snow flex items-center gap-1.5 shadow-lg"
+            aria-expanded={mobileControlsOpen}
+            aria-label={mobileControlsOpen ? 'Close controls' : 'Open controls'}
+          >
+            <svg className={`w-3.5 h-3.5 transition-transform ${mobileControlsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M19 9l-7 7-7-7" />
+            </svg>
+            Controls
+          </button>
         </div>
       </div>
+
+      {/* Mobile backdrop */}
+      {mobileControlsOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-20 bg-black/40"
+          onClick={() => setMobileControlsOpen(false)}
+        />
+      )}
 
       <EvidenceDrawer
         interactionId={selectedEdgeId}

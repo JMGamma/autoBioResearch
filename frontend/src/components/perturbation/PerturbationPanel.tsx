@@ -28,8 +28,9 @@ function ScoreRow({ entity, onNavigate }: { entity: AffectedEntity; onNavigate: 
         {hasTrail && (
           <button
             onClick={() => setExpanded(v => !v)}
-            className="px-1.5 py-1.5 text-sage hover:text-snow transition-colors flex-shrink-0"
-            title="Show explanation trail"
+            className="px-2 py-2 text-sage hover:text-snow transition-colors flex-shrink-0"
+            aria-label={expanded ? 'Hide explanation trail' : 'Show explanation trail'}
+            aria-expanded={expanded}
           >
             <svg className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
               fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -132,6 +133,11 @@ export function PerturbationPanel({ seedName, onScoresChange }: {
           <p className="text-xs text-sage font-medium">
             Predicted response ({data.stats.n_affected} affected):
           </p>
+          {data.stats.n_affected === 0 && (
+            <p className="text-xs text-sage/70 italic pt-1">
+              No entities responded to this perturbation. The network may be disconnected at depth {depth} or all signals cancelled.
+            </p>
+          )}
           {topAffected.map(a => (
             <ScoreRow key={a.entity_id} entity={a} onNavigate={() => navigate(`/entity/${a.entity_id}`)} />
           ))}

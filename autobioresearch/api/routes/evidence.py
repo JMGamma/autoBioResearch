@@ -5,7 +5,7 @@ from sqlalchemy.engine import Connection
 
 from autobioresearch.api.dependencies import get_conn
 from autobioresearch.api.schemas import EvidenceItem, EvidenceResponse
-from autobioresearch.storage.repositories import EvidenceRepo, InteractionRepo
+from autobioresearch.storage.repositories import EntityRepo, EvidenceRepo, InteractionRepo
 
 router = APIRouter()
 
@@ -16,6 +16,10 @@ def get_evidence(interaction_id: str, conn: Connection = Depends(get_conn)):
     interaction = interaction_repo.get_by_id(interaction_id)
     if not interaction:
         raise HTTPException(status_code=404, detail="Interaction not found")
+
+    entity_repo = EntityRepo(conn)
+    entity_a = entity_repo.get_by_id(interaction["entity_a_id"])
+    entity_b = entity_repo.get_by_id(interaction["entity_b_id"])
 
     evidence_repo = EvidenceRepo(conn)
     rows = evidence_repo.get_for_interaction_with_paper_metadata(interaction_id)
@@ -39,4 +43,9 @@ def get_evidence(interaction_id: str, conn: Connection = Depends(get_conn)):
         for row in rows
     ]
 
-    return EvidenceResponse(interaction_id=interaction_id, evidence=items)
+    return EvidenceResponse(
+        interaction_id=interaction_id,
+        entity_a_name=entity_a["display_name"] if entity_a else None,
+        entity_b_name=entity_b["display_name"] if entity_b else None,
+        evidence=items,
+    )

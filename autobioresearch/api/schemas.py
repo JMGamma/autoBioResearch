@@ -99,6 +99,8 @@ class EvidenceItem(BaseModel):
 
 class EvidenceResponse(BaseModel):
     interaction_id: str
+    entity_a_name: Optional[str] = None
+    entity_b_name: Optional[str] = None
     evidence: list[EvidenceItem]
 
 
@@ -107,6 +109,7 @@ class StatsResponse(BaseModel):
     n_interactions: int
     n_evidence: int
     n_open_conflicts: int
+    n_papers: int
     last_score: Optional[float]
     last_cycle_timestamp: Optional[str]
 

@@ -111,6 +111,11 @@ export function PathExplorer({ sourceEntityName, onPathSelected }: Props) {
         {searchLoading && (
           <span className="absolute right-3 top-2.5"><Spinner size="sm" /></span>
         )}
+        {dropdownOpen && debouncedQuery.length >= 2 && !searchLoading && searchResults && searchResults.length === 0 && (
+          <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-forest-mid border border-forest-light rounded-lg shadow-xl overflow-hidden">
+            <p className="px-3 py-2 text-sm text-sage">No entities match "{debouncedQuery}"</p>
+          </div>
+        )}
         {dropdownOpen && debouncedQuery.length >= 2 && searchResults && searchResults.length > 0 && (
           <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-forest-mid border border-forest-light rounded-lg shadow-xl overflow-hidden max-h-48 overflow-y-auto">
             {searchResults.map(r => (
