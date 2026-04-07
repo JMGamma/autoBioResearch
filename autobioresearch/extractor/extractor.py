@@ -587,6 +587,15 @@ class PaperExtractor:
                             float(int_data.get("confidence_score", 0.5)), 0.3
                         )
 
+                try:
+                    confidence_score = max(0.0, min(1.0, float(int_data.get("confidence_score", 0.3))))
+                except (ValueError, TypeError):
+                    logger.debug(
+                        "Non-numeric confidence_score %r for paper %s — defaulting to 0.3",
+                        int_data.get("confidence_score"), paper_id,
+                    )
+                    confidence_score = 0.3
+
                 interactions.append(ExtractedInteractionRaw(
                     entity_a=int_data["entity_a"],
                     entity_b=int_data["entity_b"],
@@ -600,7 +609,7 @@ class PaperExtractor:
                     condition=int_data.get("condition"),
                     assay_type=int_data.get("assay_type"),
                     confidence=self._norm_confidence(int_data.get("confidence")),
-                    confidence_score=float(int_data.get("confidence_score", 0.3)),
+                    confidence_score=confidence_score,
                     snippet=snippet[:self._config.max_snippet_length],
                     reasoning=int_data.get("reasoning") or "",
                 ))

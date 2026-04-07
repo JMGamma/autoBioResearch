@@ -211,8 +211,8 @@ class PerturbationCache:
                 (entity_id, mode),
             )
             self._conn.commit()
-        except Exception:
-            pass  # non-fatal
+        except Exception as exc:
+            logger.debug("perturbation cache hit_count increment failed: %s", exc)
 
     @staticmethod
     def _truncate(result: dict, depth: int) -> dict:

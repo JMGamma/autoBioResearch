@@ -10,6 +10,7 @@ class _FakeResponse:
         self.status_code = status_code
         self._payload = payload or {}
         self.headers = headers or {}
+        self.text = ""
 
     def json(self):
         return self._payload

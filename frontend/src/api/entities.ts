@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { EntitySearchResult, EntityDetail } from '../types/api'
+import type { ConflictsResponse, EntitySearchResult, EntityDetail } from '../types/api'
 
 export function searchEntities(params: {
   q: string
@@ -17,4 +17,8 @@ export function searchEntities(params: {
 
 export function getEntity(id: string): Promise<EntityDetail> {
   return apiFetch<EntityDetail>(`/api/entities/${encodeURIComponent(id)}`)
+}
+
+export function getEntityConflicts(id: string): Promise<ConflictsResponse> {
+  return apiFetch<ConflictsResponse>(`/api/entities/${encodeURIComponent(id)}/conflicts`)
 }

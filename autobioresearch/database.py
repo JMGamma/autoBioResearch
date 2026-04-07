@@ -384,6 +384,11 @@ def init_engine(db_path: str):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        # Retry up to 30 s on lock contention instead of failing instantly.
+        cursor.execute("PRAGMA busy_timeout=30000")
+        # 64 MiB page cache per connection for complex JOIN queries.
+        cursor.execute("PRAGMA cache_size=-65536")
+        cursor.execute("PRAGMA temp_store=MEMORY")
         cursor.close()
 
     return engine

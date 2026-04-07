@@ -93,6 +93,8 @@ SIGN_MAP: dict[str, int] = {
     "recruits": 0,
     "localizes": 0,
     "transports": 0,
+    "modifies": 0,
+    "modification": 0,
     "unknown": 0,
     "null": 0,  # LLM artifact: literal string "null"
     "": 0,      # NULL effect field

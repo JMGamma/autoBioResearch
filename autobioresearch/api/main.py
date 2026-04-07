@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -54,14 +55,13 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ALLOWED_ORIGINS env var overrides the default wildcard for production deployments.
-# Example: ALLOWED_ORIGINS="https://yourapp.com,https://www.yourapp.com"
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
-_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+# Load config at module level so middleware can use it.
+# pydantic-settings ensures ALLOWED_ORIGINS env var still takes precedence over config.yaml.
+_cfg = AppConfig.from_yaml()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
+    allow_origins=_cfg.allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
@@ -98,17 +98,19 @@ app.include_router(stats.router, prefix="/api", tags=["stats"])
 # We avoid mounting at "/" to prevent Starlette from shadowing API routes.
 # Instead: mount /assets explicitly and serve index.html via a catch-all route.
 _DIST_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend_dist"))
-if os.path.isdir(_DIST_DIR):
-    _assets_dir = os.path.join(_DIST_DIR, "assets")
-    if os.path.isdir(_assets_dir):
-        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+_DIST_DIR_PATH = Path(_DIST_DIR).resolve()
+if _DIST_DIR_PATH.is_dir():
+    _assets_dir = _DIST_DIR_PATH / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        candidate = os.path.join(_DIST_DIR, full_path)
-        if full_path and os.path.isfile(candidate):
+        candidate = (_DIST_DIR_PATH / full_path).resolve()
+        # Reject path traversal attempts (e.g. ../../etc/passwd).
+        if full_path and candidate.is_relative_to(_DIST_DIR_PATH) and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(os.path.join(_DIST_DIR, "index.html"))
+        return FileResponse(_DIST_DIR_PATH / "index.html")
 
 
 if __name__ == "__main__":

@@ -514,6 +514,7 @@ def test_fetch_phase_marks_failed_queries_and_uses_configured_papers_per_query()
 
 
 def test_interleaved_fetch_extraction_spaces_query_fetches():
+    main_module._shutdown = False  # reset in case a preceding test left it True
     engine, conn, repos = _repos()
     try:
         repos.queries.insert(SearchQuery(

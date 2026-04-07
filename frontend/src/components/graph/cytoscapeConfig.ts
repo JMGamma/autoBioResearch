@@ -19,6 +19,28 @@ export const EFFECT_EDGE_COLORS: Record<string, string> = {
   promotes:   '#4ade80',
   inhibits:   '#f87171', // red-400
   suppresses: '#f87171',
+  // Specific modifications → violet
+  modifies:         '#a78bfa',
+  modification:     '#a78bfa',
+  phosphorylates:   '#a78bfa',
+  dephosphorylates: '#a78bfa',
+  ubiquitinates:    '#a78bfa',
+  deubiquitinates:  '#a78bfa',
+  deubiquitylates:  '#a78bfa',
+  methylates:       '#a78bfa',
+  demethylates:     '#a78bfa',
+  acetylates:       '#a78bfa',
+  deacetylates:     '#a78bfa',
+  sumoylates:       '#a78bfa',
+  glycosylates:     '#a78bfa',
+  cleaves:          '#a78bfa',
+  hydrolyzes:       '#a78bfa',
+  catalyzes:        '#a78bfa',
+  // Regulatory (persistent, outcome unclear) → orange
+  regulates:        '#fb923c',
+  regulation:       '#fb923c',
+  modulates:        '#fb923c',
+  modulation:       '#fb923c',
   unknown:    '#4a5568', // slate
   ambiguous:  '#fbbf24', // amber-400
 }
@@ -117,11 +139,10 @@ export const stylesheet: any[] = [
   {
     selector: 'edge:selected',
     style: {
-      'line-color': '#76abae',
-      'target-arrow-color': '#76abae',
+      'line-color': '#38bdf8',
+      'target-arrow-color': '#38bdf8',
       'width': 4,
       'opacity': 1,
-      'label': 'data(label)',
     },
   },
   // ── Path highlight / dim ────────────────────────────────────────────────────

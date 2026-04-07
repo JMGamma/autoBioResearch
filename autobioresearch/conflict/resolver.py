@@ -66,10 +66,15 @@ class ConflictResolver:
         Returns total count of queries added.
         """
         open_conflicts = repos.conflicts.get_open(limit=config.conflicts_to_analyze_per_cycle)
-        actionable = [
-            c for c in open_conflicts
-            if not json.loads(c.get("generated_query_ids") or "[]")
-        ]
+        actionable = []
+        for c in open_conflicts:
+            try:
+                already_generated = json.loads(c.get("generated_query_ids") or "[]")
+            except json.JSONDecodeError:
+                logger.warning("Corrupt generated_query_ids for conflict %s — treating as empty", c.get("id"))
+                already_generated = []
+            if not already_generated:
+                actionable.append(c)
 
         if not actionable:
             return 0

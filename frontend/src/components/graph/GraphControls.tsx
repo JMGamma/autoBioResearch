@@ -10,6 +10,8 @@ interface Props {
   onLayoutChange: (l: 'fcose' | 'dagre') => void
   showUnknown: boolean
   onShowUnknownChange: (v: boolean) => void
+  edgeLimit: number
+  onEdgeLimitChange: (v: number) => void
   isLoading: boolean
 }
 
@@ -20,6 +22,7 @@ export function GraphControls({
   availableEntityTypes,
   layout, onLayoutChange,
   showUnknown, onShowUnknownChange,
+  edgeLimit, onEdgeLimitChange,
   isLoading,
 }: Props) {
   function toggleEntityType(type: string) {
@@ -74,6 +77,20 @@ export function GraphControls({
           </div>
         </div>
       )}
+
+      <div>
+        <label className="text-xs text-sage mb-2 block">
+          Edge limit: <span className="text-mist font-medium">{edgeLimit}</span>
+        </label>
+        <div className="flex gap-2">
+          {[50, 100, 150, 200].map(v => (
+            <button key={v} onClick={() => onEdgeLimitChange(v)}
+              className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${edgeLimit === v ? activeBtn : inactiveBtn}`}>
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-sage">Show unknown / ambiguous</span>

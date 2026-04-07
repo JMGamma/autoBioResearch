@@ -7,6 +7,12 @@ import difflib
 import re
 from typing import Optional
 
+# Pre-compiled patterns used in hot paths (called per paper).
+_RE_MULTILINE = re.compile(r"\n{3,}")
+_RE_HORIZ_SPACE = re.compile(r"[ \t]+")
+_RE_XML_TAGS = re.compile(r"<[^>]+>")
+_RE_WHITESPACE = re.compile(r"\s+")
+
 
 def chunk_text(text: str, max_chars: int = 6000, overlap: int = 200) -> list[tuple[int, int, str]]:
     """
@@ -122,8 +128,8 @@ def clean_jats_xml(xml_text: str) -> str:
 
     except Exception:
         # Fallback: strip all XML tags
-        text = re.sub(r"<[^>]+>", " ", xml_text)
-        text = re.sub(r"\s+", " ", text).strip()
+        text = _RE_XML_TAGS.sub(" ", xml_text)
+        text = _RE_WHITESPACE.sub(" ", text).strip()
         return text
 
 
@@ -210,6 +216,6 @@ def find_snippet_offsets(snippet: str, source_text: str) -> Optional[tuple[int, 
 def normalize_whitespace(text: str) -> str:
     """Collapse multiple whitespace, normalize line endings."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
+    text = _RE_MULTILINE.sub("\n\n", text)
+    text = _RE_HORIZ_SPACE.sub(" ", text)
     return text.strip()

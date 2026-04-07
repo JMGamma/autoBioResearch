@@ -99,9 +99,31 @@ class EvidenceItem(BaseModel):
 
 class EvidenceResponse(BaseModel):
     interaction_id: str
+    interaction_type: Optional[str] = None
     entity_a_name: Optional[str] = None
     entity_b_name: Optional[str] = None
     evidence: list[EvidenceItem]
+
+
+class ConflictSummary(BaseModel):
+    id: str
+    conflict_type: str
+    conflict_axis: str
+    status: str
+    interaction_a_entity_a: str
+    interaction_a_entity_b: str
+    interaction_a_effect: Optional[str]
+    interaction_a_type: str
+    interaction_b_entity_a: str
+    interaction_b_entity_b: str
+    interaction_b_effect: Optional[str]
+    interaction_b_type: str
+    llm_analysis: Optional[str] = None
+
+
+class ConflictsResponse(BaseModel):
+    entity_id: str
+    conflicts: list[ConflictSummary]
 
 
 class StatsResponse(BaseModel):

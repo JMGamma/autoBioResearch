@@ -99,6 +99,11 @@ export function EvidenceDrawer({ interactionId, onClose }: { interactionId: stri
               {data.entity_a_name} → {data.entity_b_name}
             </p>
           )}
+          {data?.interaction_type && (
+            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded border bg-forest text-mist border-forest-light">
+              {data.interaction_type}
+            </span>
+          )}
         </div>
         <button
           ref={closeBtnRef}

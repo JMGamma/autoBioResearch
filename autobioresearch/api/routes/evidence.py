@@ -45,6 +45,7 @@ def get_evidence(interaction_id: str, conn: Connection = Depends(get_conn)):
 
     return EvidenceResponse(
         interaction_id=interaction_id,
+        interaction_type=interaction.get("interaction_type"),
         entity_a_name=entity_a["display_name"] if entity_a else None,
         entity_b_name=entity_b["display_name"] if entity_b else None,
         evidence=items,

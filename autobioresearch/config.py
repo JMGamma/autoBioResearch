@@ -138,8 +138,11 @@ class AppConfig(BaseSettings):
         if yaml_path.exists():
             with open(yaml_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-            # Resolve db_path relative to the config file, not CWD
+            # Resolve DB paths relative to the config file, not CWD, so the
+            # server can be launched from any working directory.
             if "db_path" in data:
                 data["db_path"] = str((yaml_path.parent / data["db_path"]).resolve())
+            if "cache_db_path" in data:
+                data["cache_db_path"] = str((yaml_path.parent / data["cache_db_path"]).resolve())
         # env vars and .env take precedence over yaml (handled by pydantic-settings)
         return cls(**data)

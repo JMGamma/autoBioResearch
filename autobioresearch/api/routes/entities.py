@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from autobioresearch.api.dependencies import get_conn
-from autobioresearch.api.schemas import EntityDetail, EntitySearchResult
+from autobioresearch.api.schemas import ConflictSummary, ConflictsResponse, EntityDetail, EntitySearchResult
 from autobioresearch.storage.repositories import ConflictRepo, EntityRepo, EvidenceRepo
 
 router = APIRouter()
@@ -83,3 +83,51 @@ def get_entity(entity_id: str, conn: Connection = Depends(get_conn)):
         has_conflicts=conflict_count > 0,
         open_conflict_count=conflict_count or 0,
     )
+
+
+@router.get("/entities/{entity_id}/conflicts", response_model=ConflictsResponse)
+def get_entity_conflicts(entity_id: str, conn: Connection = Depends(get_conn)):
+    repo = EntityRepo(conn)
+    if not repo.get_by_id(entity_id):
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    rows = conn.execute(text("""
+        SELECT
+            c.id, c.conflict_type, c.conflict_axis, c.status, c.llm_analysis,
+            ia.interaction_type AS a_type, ia.effect AS a_effect,
+            ea1.display_name AS a_entity_a, ea2.display_name AS a_entity_b,
+            ib.interaction_type AS b_type, ib.effect AS b_effect,
+            eb1.display_name AS b_entity_a, eb2.display_name AS b_entity_b
+        FROM conflicts c
+        JOIN interactions ia ON c.interaction_a_id = ia.id
+        JOIN interactions ib ON c.interaction_b_id = ib.id
+        JOIN entities ea1 ON ia.entity_a_id = ea1.id
+        JOIN entities ea2 ON ia.entity_b_id = ea2.id
+        JOIN entities eb1 ON ib.entity_a_id = eb1.id
+        JOIN entities eb2 ON ib.entity_b_id = eb2.id
+        WHERE c.status IN ('open', 'reopened', 'investigating')
+          AND (ia.entity_a_id = :eid OR ia.entity_b_id = :eid)
+        ORDER BY c.penalty_weight DESC
+        LIMIT 50
+    """), {"eid": entity_id}).mappings().fetchall()
+
+    conflicts = [
+        ConflictSummary(
+            id=row["id"],
+            conflict_type=row["conflict_type"],
+            conflict_axis=row["conflict_axis"],
+            status=row["status"],
+            interaction_a_entity_a=row["a_entity_a"],
+            interaction_a_entity_b=row["a_entity_b"],
+            interaction_a_effect=row["a_effect"],
+            interaction_a_type=row["a_type"],
+            interaction_b_entity_a=row["b_entity_a"],
+            interaction_b_entity_b=row["b_entity_b"],
+            interaction_b_effect=row["b_effect"],
+            interaction_b_type=row["b_type"],
+            llm_analysis=row["llm_analysis"],
+        )
+        for row in rows
+    ]
+
+    return ConflictsResponse(entity_id=entity_id, conflicts=conflicts)

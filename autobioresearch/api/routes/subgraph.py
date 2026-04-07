@@ -38,6 +38,7 @@ _ALL_EDGES_SQL = text("""
     WHERE (i.entity_a_id IN :ids OR i.entity_b_id IN :ids)
       AND COALESCE(i.composite_confidence_score, 0.0) >= :min_score
     ORDER BY composite_confidence_score DESC
+    LIMIT :edge_limit
 """).bindparams(bindparam("ids", expanding=True))
 
 
@@ -61,9 +62,11 @@ def get_subgraph(body: SubgraphRequest, conn: Connection = Depends(get_conn)):
             break
 
         ids_tuple = tuple(frontier)
+        remaining = edge_limit - len(edges)
         rows = conn.execute(_ALL_EDGES_SQL, {
             "ids": ids_tuple,
             "min_score": min_score,
+            "edge_limit": remaining,
         }).mappings().all()
 
         new_frontier: set[str] = set()

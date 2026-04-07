@@ -31,6 +31,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE special characters so % and _ are treated as literals.
+
+    Uses '!' as the escape character to avoid backslash-in-string-literal
+    confusion when the SQL is embedded in a Python triple-quoted string.
+    The corresponding SQL clause must include ESCAPE '!'.
+    """
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
+
 # ---------------------------------------------------------------------------
 # Paper repository
 # ---------------------------------------------------------------------------
@@ -79,8 +89,55 @@ class PaperRepo:
         return True
 
     def upsert_many(self, papers: list[Paper]) -> int:
-        """Returns count of newly inserted papers."""
-        return sum(self.upsert(p) for p in papers)
+        """Returns count of newly inserted papers.
+
+        Uses a single batch SELECT to identify existing papers, then a single
+        bulk INSERT for all genuinely new ones.  Only papers that already exist
+        go through the per-row merge path (priority promotion / query_id merge).
+        """
+        if not papers:
+            return 0
+        ids = [p.id for p in papers]
+        existing_ids = {
+            row.id
+            for row in self.conn.execute(
+                select(db.papers.c.id).where(db.papers.c.id.in_(ids))
+            )
+        }
+        new_papers = [p for p in papers if p.id not in existing_ids]
+        existing_papers = [p for p in papers if p.id in existing_ids]
+
+        if new_papers:
+            now = _now()
+            self.conn.execute(
+                db.papers.insert(),
+                [
+                    dict(
+                        id=p.id,
+                        source=p.source,
+                        title=p.title,
+                        abstract=p.abstract,
+                        authors=json.dumps(p.authors),
+                        journal=p.journal,
+                        year=p.year,
+                        doi=p.doi,
+                        pmc_id=p.pmc_id,
+                        fetch_status=p.fetch_status.value,
+                        extraction_status=p.extraction_status.value,
+                        query_ids=json.dumps(p.query_ids),
+                        priority=p.priority,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    for p in new_papers
+                ],
+            )
+
+        # Merge query_ids and promote priority for already-existing papers.
+        for p in existing_papers:
+            self.upsert(p)
+
+        return len(new_papers)
 
     def get_pending_extraction(self, limit: int = 50) -> list[dict]:
         rows = self.conn.execute(
@@ -188,8 +245,8 @@ class EntityRepo:
                     synonym=syn_lower,
                     source=source,
                 ))
-            except Exception:
-                pass  # unique constraint violation = synonym already known
+            except IntegrityError:
+                pass  # unique constraint violation: synonym already known
 
     def find_by_synonym_candidates(self, synonym: str) -> list[dict]:
         rows = self.conn.execute(
@@ -360,7 +417,7 @@ class EntityRepo:
                 CASE WHEN es.synonym = :exact THEN 0 ELSE 1 END AS rank_order
             FROM entity_synonyms es
             JOIN entities e ON e.id = es.entity_id
-            WHERE es.synonym LIKE :prefix
+            WHERE es.synonym LIKE :prefix ESCAPE '!'
               AND (:entity_type IS NULL OR e.entity_type = :entity_type)
               AND (:organism_lower IS NULL OR LOWER(COALESCE(e.organism, '')) = :organism_lower)
             GROUP BY e.id
@@ -369,7 +426,7 @@ class EntityRepo:
         """)
         rows = self.conn.execute(sql, {
             "exact": q_lower,
-            "prefix": q_lower + "%",
+            "prefix": _escape_like(q_lower) + "%",
             "entity_type": entity_type,
             "organism_lower": organism.lower().strip() if organism else None,
             "limit": min(limit, 50),
@@ -496,8 +553,23 @@ class InteractionRepo:
         # composite indexes (idx_interactions_conflict_fwd / _rev) on each branch
         # independently.  A single OR join condition prevents index use entirely,
         # causing an O(n²) full scan that hangs on large databases.
+        # Fetch full interaction columns for both sides in a single query using
+        # prefixed aliases, eliminating the N+1 get_by_id loop that previously
+        # fired ~2×limit extra DB round trips per conflict detection cycle.
         stmt = text("""
-            SELECT a.id AS a_id, b.id AS b_id
+            SELECT
+                a.id AS a_id, a.entity_a_id AS a_entity_a_id, a.entity_b_id AS a_entity_b_id,
+                a.interaction_type AS a_interaction_type, a.direction AS a_direction,
+                a.effect AS a_effect, a.evidence_count AS a_evidence_count,
+                a.composite_confidence AS a_composite_confidence,
+                a.composite_confidence_score AS a_composite_confidence_score,
+                a.created_at AS a_created_at, a.updated_at AS a_updated_at,
+                b.id AS b_id, b.entity_a_id AS b_entity_a_id, b.entity_b_id AS b_entity_b_id,
+                b.interaction_type AS b_interaction_type, b.direction AS b_direction,
+                b.effect AS b_effect, b.evidence_count AS b_evidence_count,
+                b.composite_confidence AS b_composite_confidence,
+                b.composite_confidence_score AS b_composite_confidence_score,
+                b.created_at AS b_created_at, b.updated_at AS b_updated_at
             FROM interactions a
             JOIN interactions b
               ON a.entity_a_id = b.entity_a_id
@@ -540,7 +612,19 @@ class InteractionRepo:
             UNION ALL
 
             -- Reversed entity-pair order (A→B stored as B→A in one interaction).
-            SELECT a.id AS a_id, b.id AS b_id
+            SELECT
+                a.id AS a_id, a.entity_a_id AS a_entity_a_id, a.entity_b_id AS a_entity_b_id,
+                a.interaction_type AS a_interaction_type, a.direction AS a_direction,
+                a.effect AS a_effect, a.evidence_count AS a_evidence_count,
+                a.composite_confidence AS a_composite_confidence,
+                a.composite_confidence_score AS a_composite_confidence_score,
+                a.created_at AS a_created_at, a.updated_at AS a_updated_at,
+                b.id AS b_id, b.entity_a_id AS b_entity_a_id, b.entity_b_id AS b_entity_b_id,
+                b.interaction_type AS b_interaction_type, b.direction AS b_direction,
+                b.effect AS b_effect, b.evidence_count AS b_evidence_count,
+                b.composite_confidence AS b_composite_confidence,
+                b.composite_confidence_score AS b_composite_confidence_score,
+                b.created_at AS b_created_at, b.updated_at AS b_updated_at
             FROM interactions a
             JOIN interactions b
               ON a.entity_a_id = b.entity_b_id
@@ -581,13 +665,15 @@ class InteractionRepo:
 
             LIMIT :limit
         """)
-        rows = self.conn.execute(stmt, {"limit": limit}).all()
+        _A_COLS = ("id", "entity_a_id", "entity_b_id", "interaction_type", "direction",
+                   "effect", "evidence_count", "composite_confidence",
+                   "composite_confidence_score", "created_at", "updated_at")
+        rows = self.conn.execute(stmt, {"limit": limit}).mappings().all()
         pairs = []
         for row in rows:
-            a = self.get_by_id(row.a_id)
-            b = self.get_by_id(row.b_id)
-            if a and b:
-                pairs.append((a, b))
+            a = {col: row[f"a_{col}"] for col in _A_COLS}
+            b = {col: row[f"b_{col}"] for col in _A_COLS}
+            pairs.append((a, b))
         return pairs
 
     def count(self) -> int:
@@ -833,6 +919,12 @@ class ConflictRepo:
     def insert_many(self, conflicts: list[Conflict]):
         for c in conflicts:
             self.insert(c)
+
+    def get_by_id(self, conflict_id: str) -> Optional[dict]:
+        row = self.conn.execute(
+            select(db.conflicts).where(db.conflicts.c.id == conflict_id)
+        ).mappings().fetchone()
+        return dict(row) if row else None
 
     def get_open(self, limit: int = 100) -> list[dict]:
         rows = self.conn.execute(

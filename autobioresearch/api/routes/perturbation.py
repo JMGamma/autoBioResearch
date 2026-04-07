@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -18,14 +19,19 @@ logger = logging.getLogger("autobioresearch.api.perturbation")
 router = APIRouter()
 
 _cache: PerturbationCache | None = None
+_app_cfg: AppConfig | None = None
+_cache_lock = threading.Lock()
 
 
-def _get_cache() -> PerturbationCache:
-    global _cache
+def _get_initialized() -> tuple[PerturbationCache, AppConfig]:
+    """Return (cache, config), initializing both exactly once (thread-safe)."""
+    global _cache, _app_cfg
     if _cache is None:
-        cfg = AppConfig.from_yaml()
-        _cache = PerturbationCache(cfg.cache_db_path)
-    return _cache
+        with _cache_lock:
+            if _cache is None:  # double-check inside lock
+                _app_cfg = AppConfig.from_yaml()
+                _cache = PerturbationCache(_app_cfg.cache_db_path)
+    return _cache, _app_cfg
 
 
 @router.post("/perturbation", response_model=PerturbationResponse)
@@ -54,10 +60,9 @@ def run_perturbation(
     entity = repo.get_by_id(entity_id)
     seed_name = entity["canonical_name"] if entity else body.entity
 
-    cache = _get_cache()
+    cache, cfg = _get_initialized()
     t0 = time.monotonic()
 
-    cfg = AppConfig.from_yaml()
     exponent = cfg.perturbation_combination_exponent
 
     result, cache_hit = cache.get_or_compute(

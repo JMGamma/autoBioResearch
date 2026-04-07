@@ -110,7 +110,9 @@ CRITICAL RULES:
    - "low" = indirect evidence, single data point, or inferred
 5. If interaction direction is unclear, use "undirected".
 6. For effect: use "activates", "inhibits", "binds", "phosphorylates", "ubiquitinates", \
-   "cleaves", "recruits", "localizes", "transports", or null if unclear.
+   "cleaves", "recruits", "localizes", "transports", "modifies", or null if entirely unclear. \
+   Use "modifies" when the paper shows A changes B in some way but the activating/inhibitory \
+   outcome is not stated (e.g. post-translational modification without a described functional consequence).
 7. Report organisms precisely: "Homo sapiens", "Mus musculus", "Rattus norvegicus", etc.
 8. Evidence source determines evidence_type and confidence — apply these rules strictly:
    - Interactions DIRECTLY MEASURED in THIS paper's experiments → evidence_type from rule 3, \
@@ -194,7 +196,7 @@ EXTRACTION_TOOL = {
                         },
                         "effect": {
                             "type": "string",
-                            "description": "Effect: activates, inhibits, binds, phosphorylates, ubiquitinates, cleaves, recruits, localizes, transports, or null"
+                            "description": "Effect: activates, inhibits, binds, phosphorylates, ubiquitinates, cleaves, recruits, localizes, transports, modifies, or null"
                         },
                         "evidence_type": {
                             "type": "string",

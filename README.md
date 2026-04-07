@@ -51,6 +51,7 @@ autobioresearch/
   database.py                SQLite schema, indexes, and additive migrations
   metrics.py                 Score computation
   planner.py                 Query planning and targeted query generation
+  api/                       FastAPI server, routes, schemas, dependencies
   crawlers/                  PubMed, Semantic Scholar, PMC, external entity resolvers
   extractor/                 LLM client, extraction, normalization, verification
   conflict/                  Conflict detection, adjudication, and resolution
@@ -58,15 +59,22 @@ autobioresearch/
   seeders/                   UniProt/IntAct, Reactome, and SIGNOR importers
   storage/                   Repository layer for DB access
   models/                    Pydantic models
+  utils/                     Logging helpers and text utilities
+
+frontend/                    React + Vite + TypeScript + Cytoscape.js source
+frontend_dist/               Built frontend (served by the API at /)
 
 scripts/
   init_db.py                 Create schema and indexes
+  add_indexes.py             Add performance indexes (safe to re-run)
   seed_interactions.py       Import curated interactions
   reset_db.py                Soft or hard reset for SQLite DBs
   inspect_conflicts.py       Review conflict queue from the CLI
   export_graph.py            Export graph to JSON or GraphML
   reprocess_existing_data.py Backfill newer reliability fields on older DBs
   validate_synonym_overlaps.py Audit duplicate synonym mappings
+  warm_cache.py              Precompute perturbation results for top-N entities
+  benchmark_queries.py       Measure query latency and check migration readiness
   perturbation_prototype.py  Run propagation from a seed entity
 ```
 
@@ -129,16 +137,30 @@ llm_model: "claude-sonnet-4-6"
 llm_base_url: null                 # required for openai_compatible mode
 
 db_path: "./autobioresearch.db"
+cache_db_path: "./explorer_cache.db"  # perturbation cache (separate from research DB)
 
 queries_per_cycle: 10
 papers_per_cycle: 50
 targeted_queries_per_cycle: 10
+cycle_sleep_seconds: 300
+max_cycles: 0                      # 0 = run forever
 
 verification_enabled: true
 claims_to_verify_per_cycle: 25
 
 entity_resolution_enabled: true
 entity_resolution_requests_per_second: 3.0
+
+semantic_scholar_enabled: true     # set false to disable Semantic Scholar API calls
+
+# API server
+api_port: 8000
+allowed_origins:
+  - "*"                            # restrict in production
+
+# Perturbation
+perturbation_max_depth: 4          # hard cap enforced by the API
+perturbation_combination_exponent: 0.55  # multi-path score blending (lower = first path dominates)
 ```
 
 For local models, `openai_compatible` mode expects a server that supports tool or function calling.
@@ -182,6 +204,38 @@ Useful options:
 --cycles N
 --no-conflicts
 ```
+
+## API & Explorer UI
+
+The FastAPI server serves a React-based knowledge graph explorer at `/` and
+the API at `/api/`. Run it with:
+
+```bash
+uv run autobioresearch/api/main.py
+```
+
+The frontend is pre-built and served from `frontend_dist/`. For live-reloading
+during frontend development:
+
+```bash
+cd frontend && npm run dev
+```
+
+### API endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `GET /api/entities/search?q=…` | GET | Search entities by name or synonym |
+| `GET /api/entities/{id}` | GET | Entity detail with interaction summary |
+| `POST /api/subgraph` | POST | Neighborhood subgraph up to 3 hops |
+| `POST /api/perturbation` | POST | Propagate suppress/promote signal through graph |
+| `POST /api/paths` | POST | Shortest paths between two entities |
+| `GET /api/evidence/{interaction_id}` | GET | Evidence records for an interaction |
+| `GET /api/stats` | GET | Graph-level counts and cycle metrics |
+
+Rate limits: 120 req/min global; 30 req/min for `/api/perturbation`.
+
+---
 
 ## Common Scripts
 
@@ -229,6 +283,30 @@ uv run scripts/perturbation_prototype.py --entity TP53 --mode suppress --depth 3
 uv run scripts/perturbation_prototype.py --entity BRCA2 --mode promote --depth 2 --out results.json
 ```
 
+Apply database indexes (one-time setup, safe to re-run):
+
+```bash
+uv run scripts/add_indexes.py
+```
+
+Warm the perturbation cache after a large ingest or fresh deploy:
+
+```bash
+uv run scripts/warm_cache.py                      # top 50 entities, depth 3
+uv run scripts/warm_cache.py --top 100 --depth 4
+```
+
+Benchmark query latency and check migration readiness:
+
+```bash
+uv run scripts/benchmark_queries.py
+uv run scripts/benchmark_queries.py --iterations 20
+```
+
+Prints p50/p95/p99 for all hot paths. Outputs a `MIGRATION SIGNAL` line if
+`/api/perturbation` depth=3 p99 exceeds 2 s — see CLAUDE.md for the
+PostgreSQL migration checklist.
+
 ## Testing
 
 The repository includes `pytest` coverage for extraction workflows, normalization, crawlers, entity resolution, seeders, and perturbation propagation.
@@ -241,7 +319,7 @@ uv run pytest
 
 ## Notes
 
-- SQLite WAL mode is enabled by default.
+- Two SQLite databases are used intentionally: `autobioresearch.db` for the research graph (crawler writes, API reads) and `explorer_cache.db` for the perturbation cache (API writes only). WAL mode on both files allows concurrent reads without blocking. Do not merge them — the split prevents lock contention between the crawler write loop and the API cache writes.
 - Existing databases are updated with additive migrations when the schema is created.
 - Conflict resolution and claim verification both rely on the configured LLM backend.
 

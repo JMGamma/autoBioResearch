@@ -61,6 +61,28 @@ export interface SubgraphResponse {
   }
 }
 
+// ─── Conflicts ────────────────────────────────────────────────────────────────
+export interface ConflictSummary {
+  id: string
+  conflict_type: string
+  conflict_axis: string
+  status: string
+  interaction_a_entity_a: string
+  interaction_a_entity_b: string
+  interaction_a_effect: string | null
+  interaction_a_type: string
+  interaction_b_entity_a: string
+  interaction_b_entity_b: string
+  interaction_b_effect: string | null
+  interaction_b_type: string
+  llm_analysis: string | null
+}
+
+export interface ConflictsResponse {
+  entity_id: string
+  conflicts: ConflictSummary[]
+}
+
 // ─── Evidence ─────────────────────────────────────────────────────────────────
 export interface EvidenceItem {
   id: string
@@ -80,6 +102,7 @@ export interface EvidenceItem {
 
 export interface EvidenceResponse {
   interaction_id: string
+  interaction_type: string | null
   entity_a_name: string | null
   entity_b_name: string | null
   evidence: EvidenceItem[]

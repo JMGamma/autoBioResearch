@@ -4,6 +4,8 @@ export function GraphLegend({ entityTypes, showPerturbation }: { entityTypes: st
   const effects = [
     { key: 'activates', label: 'Activates' },
     { key: 'inhibits',  label: 'Inhibits' },
+    { key: 'modifies',  label: 'Modifies' },
+    { key: 'regulates', label: 'Regulates' },
     { key: 'ambiguous', label: 'Ambiguous' },
     { key: 'unknown',   label: 'Unknown' },
   ]

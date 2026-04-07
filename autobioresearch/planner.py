@@ -37,7 +37,7 @@ class QueryPlanner:
             conflict_reduction = 2.0
             if (query_row.get("origin") or "").startswith("conflict_id:"):
                 conflict_id = query_row["origin"].split(":", 1)[1]
-                conflict = next((c for c in repos.conflicts.get_open(limit=200) if c["id"] == conflict_id), None)
+                conflict = repos.conflicts.get_by_id(conflict_id)
                 if conflict:
                     conflict_reduction += float(conflict.get("penalty_weight") or 0.0) * config.penalty
                     planning_factors["conflict_penalty_weight"] = float(conflict.get("penalty_weight") or 0.0)

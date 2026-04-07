@@ -24,6 +24,7 @@ export function EntityPage() {
   const [entityTypeFilter, setEntityTypeFilter] = useState<string[]>([])
   const [layout, setLayout] = useState<'fcose' | 'dagre'>('fcose')
   const [showUnknown, setShowUnknown] = useState(false)
+  const [edgeLimit, setEdgeLimit] = useState(100)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [perturbationScores, setPerturbationScores] = useState<Map<string, number> | null>(null)
   const [selectedPath, setSelectedPath] = useState<PathResult | null>(null)
@@ -39,7 +40,7 @@ export function EntityPage() {
         hops,
         min_confidence_score: minConfidence > 0 ? minConfidence : undefined,
         entity_type_filter: entityTypeFilter.length > 0 ? entityTypeFilter : null,
-        edge_limit: 100,
+        edge_limit: edgeLimit,
       }
     : null
 
@@ -100,6 +101,8 @@ export function EntityPage() {
         onLayoutChange={setLayout}
         showUnknown={showUnknown}
         onShowUnknownChange={setShowUnknown}
+        edgeLimit={edgeLimit}
+        onEdgeLimitChange={setEdgeLimit}
         isLoading={graphLoading}
       />
       {/* Tab strip */}
